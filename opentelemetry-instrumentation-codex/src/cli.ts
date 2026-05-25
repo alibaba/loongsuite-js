@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { ExtendedTelemetryHandler } from "@loongsuite/opentelemetry-util-genai";
-import { loadState, saveState, clearState, splitIntoTurns } from "./state.js";
+import { loadState, saveState, splitIntoTurns } from "./state.js";
 import type { SessionState } from "./state.js";
 import { configureTelemetry, shutdownTelemetry } from "./telemetry.js";
 import { replaySession, buildReactSteps } from "./replay.js";
@@ -149,9 +149,13 @@ export async function cmdStop(): Promise<void> {
   });
   saveState(sessionId, state);
 
-  // Parse transcript for token usage and model info
+  // Parse transcript incrementally — only read bytes added since last cmdStop.
+  // codex transcript(rollout-*.jsonl)按 session 累加,每个 turn 都会再追加内容,
+  // 这里靠 state.transcript_offset 做增量,避免每次都重读全文件 + 解决 token 错位 bug。
+  const startOffset = state.transcript_offset || 0;
+  const startLastUsage = state.transcript_last_token_usage ?? null;
   const transcriptData = state.transcript_path
-    ? parseTranscript(state.transcript_path)
+    ? parseTranscript(state.transcript_path, startOffset, startLastUsage)
     : null;
   if (transcriptData) {
     if (state.model === "unknown" && transcriptData.model !== "unknown") {
@@ -199,15 +203,22 @@ export async function cmdStop(): Promise<void> {
   if (isLogEnabled()) {
     try {
       const allRecords: Record<string, unknown>[] = [];
-      const logTokenQueue = transcriptData?.tokenEvents
+      // 扁平 fallback 队列:仅在 tokenEventsByTurn 没命中时使用(防御性兜底)
+      const fallbackQueue = transcriptData?.tokenEvents
         ? [...transcriptData.tokenEvents]
         : [];
       const provider = transcriptData?.modelProvider || "openai";
       for (let i = 0; i < turns.length; i++) {
-        const stepCount = buildReactSteps(turns[i]!).length;
-        const turnTokenSlice = logTokenQueue.splice(0, stepCount);
+        const turn = turns[i]!;
+        const stepCount = buildReactSteps(turn).length;
+        // 主路径:按 turn_id 从分组里取本 turn 对应的 token 事件
+        let turnTokenSlice = transcriptData?.tokenEventsByTurn?.get(turn.turn_id);
+        if (!turnTokenSlice || turnTokenSlice.length === 0) {
+          // Fallback:turn_id 未命中(理论上不会发生),从扁平队列尾部取
+          turnTokenSlice = fallbackQueue.splice(-stepCount, stepCount);
+        }
         const { records } = generateTurnLogRecords(
-          turns[i]!,
+          turn,
           i,
           sessionId,
           state.model,
@@ -229,7 +240,20 @@ export async function cmdStop(): Promise<void> {
     }
   }
 
-  clearState(sessionId);
+  // State 管理:不再 clearState 删整个 state 文件(参考 Claude Code 插件 Issue 7.5 修复)。
+  // codex 的 Stop hook 按 turn 触发,而 transcript 是 session 维度持久累加的;
+  // 删 state 会导致下个 turn 的 cmdStop 看不到历史 events,但 transcript 仍含全部 token,
+  // 错位地从队头取本 turn token → token 字段在第二个 turn 起永远固定为 turn 1 的值。
+  // 改为:清空 events + 固化 transcript_offset / lastEmittedUsage,保持 state 文件存活,
+  // 下次只读增量,且能跨 cmdStop 识别心跳事件。
+  if (transcriptData) {
+    state.transcript_offset = transcriptData.nextOffset;
+    if (transcriptData.lastEmittedUsage) {
+      state.transcript_last_token_usage = transcriptData.lastEmittedUsage;
+    }
+  }
+  state.events = [];
+  saveState(sessionId, state);
 }
 
 // --- Install / Uninstall ---

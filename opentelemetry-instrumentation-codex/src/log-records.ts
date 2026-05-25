@@ -86,6 +86,13 @@ export function generateTurnLogRecords(
           : "";
     const inputTokens = tokenEvent?.inputTokens ?? 0;
     const outputTokens = tokenEvent?.outputTokens ?? 0;
+    // total_tokens 优先用 transcript 上报的源值(语义更稳,未来若计入 reasoning_output 不会失真);
+    // 仅在源值缺失/为 0 时回退到 input+output 的派生公式。
+    const totalTokens =
+      tokenEvent?.totalTokens && tokenEvent.totalTokens > 0
+        ? tokenEvent.totalTokens
+        : inputTokens + outputTokens;
+    const reasoningOutputTokens = tokenEvent?.reasoningOutputTokens ?? 0;
 
     records.push({
       time_unix_nano: String(Math.round(step.llm_end_time * 1e9)),
@@ -101,7 +108,8 @@ export function generateTurnLogRecords(
       "usage.input_tokens": inputTokens,
       "usage.output_tokens": outputTokens,
       "usage.cache_read_tokens": tokenEvent?.cachedInputTokens ?? 0,
-      "usage.total_tokens": inputTokens + outputTokens,
+      "usage.reasoning_output_tokens": reasoningOutputTokens,
+      "usage.total_tokens": totalTokens,
       "output.messages": JSON.stringify(step.llm_output_messages),
     });
 

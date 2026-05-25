@@ -67,6 +67,18 @@ export interface SessionState {
   start_time: number;
   events: SessionEvent[];
   transcript_path?: string;
+  // codex transcript 已消费字节偏移(跨 turn 持久化)。
+  // 每次 cmdStop 后固化为下次 parseTranscript 的起始位置。
+  transcript_offset?: number;
+  // 上一次已采纳的 last_token_usage(跨 turn 持久化)。
+  // 用于增量读取下识别 codex 心跳事件(跨 turn 重发同一份 last_token_usage)。
+  transcript_last_token_usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens: number;
+    reasoningOutputTokens: number;
+    totalTokens: number;
+  };
 }
 
 // --- Turn (per-turn grouping for replay) ---

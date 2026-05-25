@@ -61,8 +61,8 @@ export function replaySession(
   const turns = splitIntoTurns(state);
   const traceIds: string[] = [];
 
-  // Build a consumable queue of per-LLM-call token events
-  const tokenQueue = transcriptData?.tokenEvents
+  // Fallback 队列:仅在 turn_id 未命中 tokenEventsByTurn 时使用
+  const fallbackQueue = transcriptData?.tokenEvents
     ? [...transcriptData.tokenEvents]
     : [];
 
@@ -72,7 +72,7 @@ export function replaySession(
       turn,
       state.session_id,
       transcriptData ?? null,
-      tokenQueue,
+      fallbackQueue,
     );
     if (traceId) traceIds.push(traceId);
   }
@@ -86,7 +86,7 @@ function replayTurn(
   turn: Turn,
   sessionId: string,
   transcriptData: TranscriptData | null,
-  tokenQueue: TokenUsage[],
+  fallbackQueue: TokenUsage[],
 ): string | null {
   const provider = transcriptData?.modelProvider || "openai";
   const model = turn.model !== "unknown" && turn.model
@@ -123,10 +123,18 @@ function replayTurn(
   const steps = buildReactSteps(turn);
   const llmCount = steps.length;
 
-  // Consume token events for this turn's LLM calls
+  // 主路径:按 turn_id 从分组里取本 turn 的 token 事件;
+  // Fallback:turn_id 未命中时(理论不会),从扁平队列头部消费。
+  const byTurn = transcriptData?.tokenEventsByTurn?.get(turn.turn_id);
   const turnTokens: (TokenUsage | null)[] = [];
-  for (let i = 0; i < llmCount; i++) {
-    turnTokens.push(tokenQueue.length > 0 ? tokenQueue.shift()! : null);
+  if (byTurn && byTurn.length > 0) {
+    for (let i = 0; i < llmCount; i++) {
+      turnTokens.push(byTurn[i] ?? null);
+    }
+  } else {
+    for (let i = 0; i < llmCount; i++) {
+      turnTokens.push(fallbackQueue.length > 0 ? fallbackQueue.shift()! : null);
+    }
   }
 
   // Aggregate token totals for AGENT span
