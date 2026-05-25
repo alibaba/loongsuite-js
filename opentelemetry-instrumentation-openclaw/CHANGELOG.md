@@ -2,6 +2,60 @@
 
 本文档记录 `opentelemetry-instrumentation-openclaw` 的重要变更。
 
+## [0.1.3-beta] - 2026-05-07
+
+### 背景
+
+- `0.1.2` 版本已支持完整的 ReAct 多轮链路分段（ENTRY → AGENT → STEP → LLM/TOOL），但尚不支持 W3C Trace Context 传播，无法与上游调用方关联 trace。
+- 本次 `0.1.3-beta` 的核心目标是：引入 trace 传播能力、迁移至 `@loongsuite/opentelemetry-util-genai` handler 架构、支持环境变量配置降级。
+
+### 新增
+
+- **自定义 Resource / Span 属性注入**：
+  - 配置文件支持 `resourceAttributes`（注入到 Resource）和 `globalSpanAttributes`（注入到所有 span）
+  - 环境变量支持 `OTEL_RESOURCE_ATTRIBUTES`（标准 OTel 格式 `key1=value1,key2=value2`）和 `OTEL_SPAN_ATTRIBUTES`（同格式）
+  - 优先级：配置文件 > 环境变量；per-request `customAttributes` > `globalSpanAttributes` > 内置属性
+  - 新增测试用例：`test/custom-attributes.test.ts`（13 个用例覆盖解析、优先级、注入、边界场景）
+- **W3C Trace Context 传播**：
+  - 支持从 HTTP 请求头 `traceparent` 继承上游 trace context，所有 span 自动关联到上游调用链
+  - 支持向下游 LLM API 请求注入 `traceparent`，实现端到端全链路追踪
+  - 配置项 `enableTracePropagation`（布尔）和 `propagationTargetUrls`（URL 子串数组）
+- **WebSocket 消息体嵌入传播协议**（`<!--otel:{JSON}-->`）：
+  - 支持在消息内容末尾嵌入 `<!--otel:{"tp":"00-...", "attr":{...}}-->` 传递 traceparent 和自定义属性
+  - 自定义属性传播到 ENTRY/AGENT/STEP/LLM 所有 span
+  - 安全限制：最多 20 个属性，key 最长 128 字符，value 最长 1024 字符，禁止 `openclaw.` 和 `gen_ai.` 前缀
+- **环境变量配置降级**：当 `openclaw.json` 中未设置对应字段时，自动从环境变量读取：
+  - `ARMS_OTLP_ENDPOINT` → endpoint
+  - `ARMS_LICENSE_KEY` → headers.x-arms-license-key
+  - `ARMS_PROJECT` → headers.x-arms-project
+  - `ARMS_CMS_WORKSPACE` → headers.x-cms-workspace
+  - `ARMS_SERVICE_NAME` / `OTEL_SERVICE_NAME` → serviceName
+  - `ARMS_TRACE_DEBUG` → debug
+  - `ARMS_ENABLE_TRACE_PROPAGATION` → enableTracePropagation
+- Resource 新增 `gen_ai.agent.system=openclaw` 属性
+- 插件 manifest 新增 `activation` 声明，兼容 OpenClaw 2026.5.4 gateway 启动加载机制
+- 安装脚本自动检测 OpenClaw 版本，>= 2026.4.25 时写入 `hooks.allowConversationAccess: true`；低版本跳过以避免配置校验报错
+- 新增测试用例：`trace-compat.test.ts`（999 行）、`trace-propagation.test.ts`（441 行）
+
+### 变更
+
+- **架构迁移**：span 构建和生命周期管理迁移至 `@loongsuite/opentelemetry-util-genai`：
+  - 新增 `src/invocation-builder.ts`：统一构建 LLM/Tool/Entry/Agent/Step 的 invocation 对象
+  - 新增 `src/invocation-compat.ts`：新旧 invocation 格式兼容层（消息序列化、finish_reasons、span kind dialect）
+  - 新增 `src/trace-propagation.ts`：W3C Trace Context 解析、HTTP Server/Client monkey-patch、消息体嵌入提取
+  - `src/index.ts` 重构：从直接操作 span 改为操作 invocation + handler 驱动
+- 新增 `@loongsuite/opentelemetry-util-genai` 依赖
+- 配置优先级明确为：配置文件 > 环境变量 > 默认值
+- 安装脚本（`install.sh`、`install-wget.sh`、`install-local-test.sh`）新增 OpenClaw 版本检测，>= 2026.4.25 时写入 `hooks.allowConversationAccess`；低版本自动跳过
+
+### 修复
+
+- 修复 ENTRY/STEP span 结束时间虚高问题：将 ENTRY 和 STEP span 的 endTime 改为在 `agent_end` handler 同步阶段预先捕获，不再使用 `setTimeout` 回调内的 `Date.now()`。此前 OpenClaw 运行时在 agent 执行完成后的内部收尾处理（会话清理、上下文维护、消息交付等）会延迟回调执行，导致 ENTRY span 时长比实际请求处理时长多出数十秒。修复后 ENTRY、AGENT、STEP 三个 span 使用同一时间戳结束，`request.duration_ms` 也相应修正
+- 修复 WebSocket 场景下自定义属性丢失问题：将 `extractOtelFromContent()` 和 `ensureEntrySpan()` 移出 `isUserMessage` 条件块，使 WebSocket 通道（`rawChannelId` 以 `agent/` 开头）也能正确提取 trace context 和 custom attributes
+- 修复 OpenClaw 2026.5.4 插件不加载问题：manifest 缺少 `activation` 声明导致 gateway 启动时跳过加载
+
+---
+
 ## [0.1.2] - 2026-03-26
 
 ### 背景
@@ -43,4 +97,3 @@
 ### 说明
 
 - 宿主运行时中，`after_tool_call` 偶发缺失 `runId`/`toolCallId` 仍可能发生；插件保留 fallback 匹配机制（设计内行为）。
-

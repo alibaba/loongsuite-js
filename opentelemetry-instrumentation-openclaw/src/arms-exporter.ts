@@ -82,6 +82,8 @@ export class ArmsExporter {
       "host.name": hostname(),
       "telemetry.sdk.language": "nodejs",
       "acs.arms.service.feature": "genai_app",
+      "gen_ai.agent.system": "openclaw",
+      ...this.config.resourceAttributes,
     });
 
     const traceUrl = this.resolveTraceUrl();
@@ -270,6 +272,30 @@ export class ArmsExporter {
     if (this.provider) {
       await this.provider.shutdown();
     }
+  }
+
+  getTracerProvider(): BasicTracerProvider | null {
+    return this.provider;
+  }
+
+  getSpanKindAttrName(): string {
+    return SPAN_KIND_ATTR;
+  }
+
+  resolveParentContextFor(parentSpanId?: string): ReturnType<typeof context.active> {
+    return this.resolveParentContext(parentSpanId);
+  }
+
+  getOpenSpan(spanId: string): Span | undefined {
+    return this.openSpans.get(spanId);
+  }
+
+  registerOpenSpan(spanId: string, span: Span): void {
+    this.openSpans.set(spanId, span);
+  }
+
+  unregisterOpenSpan(spanId: string): void {
+    this.openSpans.delete(spanId);
   }
 
   // ---------------------------------------------------------------------------

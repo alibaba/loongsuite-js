@@ -11,6 +11,14 @@ cd "$PROJECT_DIR"
 echo "==> Installing dependencies..."
 npm ci --ignore-scripts
 
+echo "==> Checking package-lock.json for internal registry URLs..."
+if grep -q "registry.anpm.alibaba-inc.com" "$PROJECT_DIR/package-lock.json"; then
+  echo "ERROR: package-lock.json contains internal registry URLs (registry.anpm.alibaba-inc.com)."
+  echo "       Please regenerate with: rm -rf node_modules package-lock.json && npm install"
+  exit 1
+fi
+echo "    OK — no internal registry URLs found."
+
 echo "==> Building TypeScript..."
 npm run build
 

@@ -9,32 +9,54 @@ import type { OpenClawPluginApi } from "../src/types.js";
 // ---------------------------------------------------------------------------
 
 vi.mock("@opentelemetry/exporter-trace-otlp-proto", () => ({
-  OTLPTraceExporter: vi.fn().mockImplementation(() => ({})),
+  OTLPTraceExporter: class MockOTLPTraceExporter {},
 }));
 vi.mock("@opentelemetry/resources", () => ({
   resourceFromAttributes: vi.fn().mockReturnValue({}),
 }));
-vi.mock("@opentelemetry/sdk-trace-base", () => ({
-  BasicTracerProvider: vi.fn().mockImplementation(() => ({
-    getTracer: vi.fn().mockReturnValue({
-      startSpan: vi.fn().mockReturnValue({
-        setAttribute: vi.fn(),
-        setStatus: vi.fn(),
-        end: vi.fn(),
-        spanContext: vi.fn().mockReturnValue({ traceId: "t1", spanId: "s1" }),
-      }),
-    }),
-    forceFlush: vi.fn().mockResolvedValue(undefined),
-    shutdown: vi.fn().mockResolvedValue(undefined),
-  })),
-  BatchSpanProcessor: vi.fn().mockImplementation(() => ({})),
-}));
-vi.mock("@opentelemetry/api", () => ({
-  trace: { setSpan: vi.fn().mockReturnValue({}) },
-  context: { active: vi.fn().mockReturnValue({}) },
-  SpanKind: { SERVER: 0, CLIENT: 1, INTERNAL: 2 },
-  SpanStatusCode: { UNSET: 0, OK: 1, ERROR: 2 },
-}));
+vi.mock("@opentelemetry/sdk-trace-base", () => {
+  class MockBasicTracerProvider {
+    getTracer() {
+      return {
+        startSpan: vi.fn().mockReturnValue({
+          setAttribute: vi.fn(),
+          setAttributes: vi.fn(),
+          setStatus: vi.fn(),
+          updateName: vi.fn(),
+          end: vi.fn(),
+          isRecording: vi.fn().mockReturnValue(true),
+          spanContext: vi.fn().mockReturnValue({ traceId: "t1", spanId: "s1" }),
+        }),
+      };
+    }
+    addSpanProcessor() {}
+    forceFlush() { return Promise.resolve(); }
+    shutdown() { return Promise.resolve(); }
+  }
+  return {
+    BasicTracerProvider: MockBasicTracerProvider,
+    BatchSpanProcessor: class MockBatchSpanProcessor {},
+  };
+});
+vi.mock("@opentelemetry/api", () => {
+  const makeContext = () => {
+    const store = new Map();
+    const ctx: Record<string, unknown> = {
+      getValue: (k: unknown) => store.get(k),
+      setValue: (k: unknown, v: unknown) => { const c = makeContext(); (c as any).__store = new Map(store); (c as any).__store.set(k, v); (c.getValue as any) = (kk: unknown) => (c as any).__store.get(kk); return c; },
+      deleteValue: (k: unknown) => { const c = makeContext(); (c as any).__store = new Map(store); (c as any).__store.delete(k); (c.getValue as any) = (kk: unknown) => (c as any).__store.get(kk); return c; },
+    };
+    return ctx;
+  };
+  return {
+    trace: { setSpan: vi.fn().mockImplementation((_ctx: unknown) => makeContext()) },
+    context: { active: vi.fn().mockImplementation(() => makeContext()) },
+    SpanKind: { SERVER: 0, CLIENT: 1, INTERNAL: 2 },
+    SpanStatusCode: { UNSET: 0, OK: 1, ERROR: 2 },
+    metrics: { getMeter: vi.fn().mockReturnValue({ createHistogram: vi.fn().mockReturnValue({ record: vi.fn() }) }) },
+    diag: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), verbose: vi.fn() },
+  };
+});
 vi.mock("@opentelemetry/semantic-conventions", () => ({
   ATTR_SERVICE_NAME: "service.name",
 }));

@@ -16,10 +16,10 @@ DIAG_PLUGIN_NAME="diagnostics-otel"
 DEFAULT_PLUGIN_FILE="./release/opentelemetry-instrumentation-openclaw.tar.gz"
 
 # ── Defaults (can be overridden by CLI args) ──
-ENDPOINT="https://your-otlp-endpoint/apm/trace/opentelemetry"
-LICENSE_KEY="your-license-key"
-ARMS_PROJECT="your-arms-project"
-CMS_WORKSPACE="your-cms-workspace"
+ENDPOINT=""
+LICENSE_KEY=""
+ARMS_PROJECT=""
+CMS_WORKSPACE=""
 SERVICE_NAME="openclaw-cms"
 PLUGIN_FILE="${DEFAULT_PLUGIN_FILE}"
 INSTALL_DIR=""
@@ -132,6 +132,23 @@ if ! command -v "$OPENCLAW_CMD" &>/dev/null; then
 fi
 ok "OpenClaw CLI found"
 
+# ── Detect OpenClaw version for hooks compatibility ──
+OPENCLAW_VERSION=$("$OPENCLAW_CMD" --version 2>/dev/null | grep -oE '[0-9]{4}\.[0-9]+\.[0-9]+' | head -1)
+NEEDS_HOOKS=false
+if [[ -n "$OPENCLAW_VERSION" ]]; then
+  OC_MAJOR=$(echo "$OPENCLAW_VERSION" | cut -d. -f1)
+  OC_MINOR=$(echo "$OPENCLAW_VERSION" | cut -d. -f2)
+  OC_PATCH=$(echo "$OPENCLAW_VERSION" | cut -d. -f3)
+  OC_NUM=$((OC_MAJOR * 10000 + OC_MINOR * 100 + OC_PATCH))
+  if [[ $OC_NUM -ge 20260425 ]]; then
+    NEEDS_HOOKS=true
+  fi
+  ok "OpenClaw $OPENCLAW_VERSION (hooks.allowConversationAccess: $([ "$NEEDS_HOOKS" = true ] && echo 'supported' || echo 'not supported, skipping'))"
+else
+  NEEDS_HOOKS=true
+  warn "Could not detect OpenClaw version, assuming hooks.allowConversationAccess is supported"
+fi
+
 # ── Check endpoint connectivity ──
 info "Checking endpoint connectivity: ${ENDPOINT}"
 ENDPOINT_HTTP_CODE=$(curl -o /dev/null -s -w "%{http_code}" "$ENDPOINT" -m 10 2>/dev/null || echo "000")
@@ -221,6 +238,7 @@ const cmsWorkspace = process.argv[7];
 const serviceName = process.argv[8];
 const enableMetrics = process.argv[9] === 'true';
 const diagPluginName = process.argv[10];
+const needsHooks = process.argv[11] === 'true';
 
 let config = {};
 try {
@@ -245,7 +263,7 @@ const pluginHeaders = {};
 if (licenseKey) pluginHeaders['x-arms-license-key'] = licenseKey;
 if (armsProject) pluginHeaders['x-arms-project'] = armsProject;
 if (cmsWorkspace) pluginHeaders['x-cms-workspace'] = cmsWorkspace;
-config.plugins.entries[pluginName] = {
+const entry = {
   enabled: true,
   config: {
     endpoint,
@@ -254,6 +272,10 @@ config.plugins.entries[pluginName] = {
     debug: true
   }
 };
+if (needsHooks) {
+  entry.hooks = { allowConversationAccess: true };
+}
+config.plugins.entries[pluginName] = entry;
 
 if (enableMetrics) {
   if (!config.plugins.allow.includes(diagPluginName)) config.plugins.allow.push(diagPluginName);
@@ -288,7 +310,8 @@ fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
   "$CMS_WORKSPACE" \
   "$SERVICE_NAME" \
   "$ENABLE_METRICS" \
-  "$DIAG_PLUGIN_NAME"
+  "$DIAG_PLUGIN_NAME" \
+  "$NEEDS_HOOKS"
 
 ok "Config updated"
 

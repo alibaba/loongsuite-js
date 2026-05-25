@@ -122,6 +122,28 @@ if ! command -v wget &>/dev/null; then
 fi
 ok "wget available"
 
+# ── Detect OpenClaw version for hooks compatibility ──
+NEEDS_HOOKS=true
+if command -v openclaw &>/dev/null; then
+  OPENCLAW_VERSION=$(openclaw --version 2>/dev/null | grep -oE '[0-9]{4}\.[0-9]+\.[0-9]+' | head -1)
+  if [[ -n "$OPENCLAW_VERSION" ]]; then
+    OC_MAJOR=$(echo "$OPENCLAW_VERSION" | cut -d. -f1)
+    OC_MINOR=$(echo "$OPENCLAW_VERSION" | cut -d. -f2)
+    OC_PATCH=$(echo "$OPENCLAW_VERSION" | cut -d. -f3)
+    OC_NUM=$((OC_MAJOR * 10000 + OC_MINOR * 100 + OC_PATCH))
+    if [[ $OC_NUM -ge 20260425 ]]; then
+      NEEDS_HOOKS=true
+    else
+      NEEDS_HOOKS=false
+    fi
+    ok "OpenClaw $OPENCLAW_VERSION (hooks.allowConversationAccess: $([ "$NEEDS_HOOKS" = true ] && echo 'supported' || echo 'not supported, skipping'))"
+  else
+    warn "Could not detect OpenClaw version, assuming hooks.allowConversationAccess is supported"
+  fi
+else
+  info "OpenClaw CLI not found (pre-install mode), will write hooks.allowConversationAccess by default"
+fi
+
 # ── Remove legacy install directory ──
 LEGACY_DIR="${HOME}/.openclaw/extensions/openclaw-cms-plugin"
 if [[ -d "$LEGACY_DIR" ]]; then
@@ -286,6 +308,7 @@ const cmsWorkspace   = process.argv[7];
 const serviceName    = process.argv[8];
 const enableMetrics  = process.argv[9] === 'true';
 const diagPluginName = process.argv[10];
+const needsHooks     = process.argv[11] === 'true';
 
 let config = {};
 try {
@@ -316,7 +339,7 @@ const pluginHeaders = {};
 if (licenseKey) pluginHeaders['x-arms-license-key'] = licenseKey;
 if (armsProject) pluginHeaders['x-arms-project'] = armsProject;
 if (cmsWorkspace) pluginHeaders['x-cms-workspace'] = cmsWorkspace;
-config.plugins.entries[pluginName] = {
+const entry = {
   enabled: true,
   config: {
     endpoint,
@@ -324,6 +347,10 @@ config.plugins.entries[pluginName] = {
     serviceName
   }
 };
+if (needsHooks) {
+  entry.hooks = { allowConversationAccess: true };
+}
+config.plugins.entries[pluginName] = entry;
 
 // ── diagnostics-otel ──
 const diagChanges = [];
@@ -416,7 +443,8 @@ process.stdout.write(diagChanges.join('|'));
   "$CMS_WORKSPACE" \
   "$SERVICE_NAME" \
   "$ENABLE_METRICS" \
-  "$DIAG_PLUGIN_NAME"
+  "$DIAG_PLUGIN_NAME" \
+  "$NEEDS_HOOKS"
 )
 
 ok "Config updated"

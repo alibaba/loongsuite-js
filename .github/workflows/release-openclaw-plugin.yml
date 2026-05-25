@@ -15,6 +15,14 @@ on:
         required: true
         default: true
         type: boolean
+      oss_bucket:
+        description: "OSS bucket name"
+        required: true
+        default: "arms-apm-cn-hangzhou-pre"
+      oss_endpoint:
+        description: "OSS endpoint"
+        required: true
+        default: "oss-cn-hangzhou.aliyuncs.com"
       dry_run:
         description: "Build/package only, skip OSS upload and GitHub release"
         required: true
@@ -23,6 +31,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   release-openclaw-plugin:
@@ -31,6 +40,8 @@ jobs:
       PLUGIN_DIR: opentelemetry-instrumentation-openclaw
       PLUGIN_NAME: opentelemetry-instrumentation-openclaw
       TAG_PREFIX: opentelemetry-instrumentation-openclaw/v
+      OSS_BUCKET: ${{ github.event.inputs.oss_bucket }}
+      OSS_ENDPOINT: ${{ github.event.inputs.oss_endpoint }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,6 +62,14 @@ jobs:
       - name: Run tests
         working-directory: ${{ env.PLUGIN_DIR }}
         run: npm test
+
+      - name: Check package-lock.json for internal registry URLs
+        working-directory: ${{ env.PLUGIN_DIR }}
+        run: |
+          if grep -q "registry.anpm.alibaba-inc.com" package-lock.json; then
+            echo "::error::package-lock.json contains internal registry URLs (registry.anpm.alibaba-inc.com). Regenerate with: rm -rf node_modules package-lock.json && npm install"
+            exit 1
+          fi
 
       - name: Validate release version
         id: validate_version
@@ -93,6 +112,13 @@ jobs:
           name: ${{ env.PLUGIN_NAME }}-${{ steps.validate_version.outputs.package_version }}
           path: release-assets/*
 
+      - name: Configure Alibaba Cloud credentials (OIDC)
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: aliyun/configure-aliyun-credentials-action@v1
+        with:
+          role-to-assume: "acs:ram::1098370038733503:role/github-ci-oss-uploader"
+          oidc-provider-arn: "acs:ram::1098370038733503:oidc-provider/github-actions"
+
       - name: Install ossutil
         if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
@@ -101,33 +127,24 @@ jobs:
 
       - name: Upload assets to OSS (versioned path)
         if: ${{ github.event.inputs.dry_run != 'true' }}
-        env:
-          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
-          OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
-          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
-          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
         run: |
-          test -n "${OSS_BUCKET}" && test -n "${OSS_ENDPOINT}" && test -n "${OSS_ACCESS_KEY_ID}" && test -n "${OSS_ACCESS_KEY_SECRET}"
           OSS_BASE="oss://${OSS_BUCKET}/${{ github.event.inputs.oss_path_prefix }}/${{ steps.validate_version.outputs.package_version }}"
           ./ossutil64 cp release-assets/ "${OSS_BASE}/" -r \
             --endpoint "${OSS_ENDPOINT}" \
-            --access-key-id "${OSS_ACCESS_KEY_ID}" \
-            --access-key-secret "${OSS_ACCESS_KEY_SECRET}" \
+            --access-key-id "$ALIBABA_CLOUD_ACCESS_KEY_ID" \
+            --access-key-secret "$ALIBABA_CLOUD_ACCESS_KEY_SECRET" \
+            --sts-token "$ALIBABA_CLOUD_SECURITY_TOKEN" \
             --update
 
       - name: Upload assets to OSS (latest alias)
         if: ${{ github.event.inputs.dry_run != 'true' && github.event.inputs.create_latest_alias == 'true' }}
-        env:
-          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
-          OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
-          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
-          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
         run: |
-          OSS_LATEST="oss://${OSS_BUCKET}/${{ github.event.inputs.oss_path_prefix }}/latest"
+          OSS_LATEST="oss://${OSS_BUCKET}/${{ github.event.inputs.oss_path_prefix }}"
           ./ossutil64 cp release-assets/ "${OSS_LATEST}/" -r \
             --endpoint "${OSS_ENDPOINT}" \
-            --access-key-id "${OSS_ACCESS_KEY_ID}" \
-            --access-key-secret "${OSS_ACCESS_KEY_SECRET}" \
+            --access-key-id "$ALIBABA_CLOUD_ACCESS_KEY_ID" \
+            --access-key-secret "$ALIBABA_CLOUD_ACCESS_KEY_SECRET" \
+            --sts-token "$ALIBABA_CLOUD_SECURITY_TOKEN" \
             --update
 
       - name: Check release tag does not exist
