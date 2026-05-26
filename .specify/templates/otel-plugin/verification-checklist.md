@@ -54,7 +54,7 @@
 4. 调 replaySession → forceFlush
 5. `exporter.getFinishedSpans()` → 断言
 
-**6 项必须断言**:
+**9 项必须断言**:
 
 | # | 断言 | 对应 Constitution |
 |---|---|---|
@@ -98,7 +98,7 @@
 2. 执行后对比:JSONL 中的 `span_id` 与 `InMemoryExporter.getFinishedSpans()` 导出的 span 的 `spanContext().spanId` 一致
 3. `trace_id` 与导出的 traceId 一致
 
-### V4.8 详细测试方法 — input_token 全量值(Anthropic provider)
+### V4.8 详细测试方法 — input_tokens 全量值(Anthropic provider)
 
 1. 构造含 cache token 的 mock LLM 事件:
    ```js

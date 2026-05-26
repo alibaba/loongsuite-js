@@ -241,10 +241,13 @@ totalInput = api_input_tokens + cache_read_input_tokens + cache_creation_input_t
 
 ## C13. CONFIG_DIR 环境变量兼容
 
-当目标 agent 支持自定义配置目录的环境变量时(如 `CLAUDE_CONFIG_DIR`、`CODEX_CONFIG_DIR`),插件的配置文件路径必须跟随:
+当目标 agent 支持自定义配置目录的环境变量时(如 `CLAUDE_CONFIG_DIR`、`CODEX_CONFIG_DIR`),插件的配置文件路径必须跟随。**通用模板**(把 `<AGENT>` 替换为目标 agent 的标识,如 `CLAUDE` / `CODEX`):
 
 ```js
-const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
+// 形如 ~/.claude / ~/.codex,默认目录由 agent 决定
+const DEFAULT_DIR = path.join(os.homedir(), ".<agent>");
+// 优先 env var;<AGENT>_CONFIG_DIR 由目标 agent 自己定义,插件不能编造
+const configDir = process.env.<AGENT>_CONFIG_DIR || DEFAULT_DIR;
 const CONFIG_PATH = path.join(configDir, "otel-config.json");
 ```
 
