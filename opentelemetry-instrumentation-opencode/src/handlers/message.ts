@@ -80,6 +80,7 @@ function getOrCreateLLMSpan(
       "gen_ai.react.round": stepRound,
       "gen_ai.loop.id": invocation.invocationID,
       "gen_ai.loop.iteration": stepRound,
+      "opencode.message.id": messageID,
     }),
     parentCtx,
     startTime,
@@ -408,6 +409,8 @@ export function handleMessageUpdated(e: EventMessageUpdated, ctx: HandlerContext
 
     const invocation = ctx.activeInvocations.get(sessionID)
     if (invocation) {
+      invocation.entrySpan.setAttribute("opencode.message.id", assistant.id)
+      invocation.agentSpan.setAttribute("opencode.message.id", assistant.id)
       if (outputMsgsJson) {
         invocation.entrySpan.setAttribute("gen_ai.output.messages", outputMsgsJson)
         invocation.agentSpan.setAttribute("gen_ai.output.messages", outputMsgsJson)
@@ -559,6 +562,7 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
         "gen_ai.react.round": round,
         "gen_ai.loop.id": invocation.invocationID,
         "gen_ai.loop.iteration": round,
+        "opencode.message.id": sp.messageID,
       }),
       invocation.agentContext,
     )
@@ -617,6 +621,7 @@ export function handleMessagePartUpdated(e: EventMessagePartUpdated, ctx: Handle
           "gen_ai.react.round": stepActive?.round ?? llmSpan?.stepRound ?? 0,
           "gen_ai.loop.id": ctx.activeInvocations.get(toolPart.sessionID)?.invocationID ?? "",
           "gen_ai.loop.iteration": stepActive?.round ?? llmSpan?.stepRound ?? 0,
+          "opencode.message.id": toolPart.messageID,
         }),
         parentCtx,
         toolPart.state.time.start,
