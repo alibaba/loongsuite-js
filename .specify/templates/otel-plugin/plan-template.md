@@ -65,14 +65,50 @@ opentelemetry-instrumentation-<AGENT>/
 - `trust.ts` 复刻目标 agent 的 hash 算法
 - install 时清理 stale state,写 BEGIN/END marker block
 
+### 2.5 Hook ↔ Transcript 对齐策略(Constitution C14)
+
+**前置**:本节仅适用于**同时**消费 hook 事件流和 transcript 文件的插件;仅消费一种数据源的可跳过。
+
+plan 阶段必须显式回答以下三个问题:
+
+1. **关联键选择**(优先级:turn_id > message_id > byteOffset > 时间窗)
+   - 调研目标 agent 的 transcript schema:是否带 `turn_id` / `message_id` / `response_id` 等显式 ID?
+   - 没有 ID → 选 `byteOffset` 增量(transcript 必须单调追加才适用)
+   - byteOffset 不可用 → 退化到时间窗锚点(最弱,需文档化原因)
+
+2. **跨 hook 边界状态持久化**
+   - Stop hook 是 per-turn 触发还是 per-session 触发?(查 agent hook 文档)
+   - per-turn 触发的话,**禁止 cmdStop 末尾 `clearState` 删 state**;改为清空 `events` + 保留水位线字段(`transcript_offset` / `last_consumed_id` / `last_emitted_usage` 等)
+   - state schema 必须显式声明这些水位线字段(见 codex 插件 `state.ts`:`transcript_offset` + `transcript_last_token_usage`)
+
+3. **fallback 与去重策略**
+   - 关联键命中失败时的兜底取法是什么?(从扁平队列尾部取 N 条 / 时间窗近邻 / 跳过)
+   - 同关联键下的重复事件(心跳 / 快照重发)如何识别?
+
+**对齐流程示意**(以 codex 为例):
+```
+parseTranscript(path, byteOffset, lastUsage)
+  → 增量读 [byteOffset, fileSize) 字节
+  → 按 task_started/turn_context 维护 currentTurnId
+  → token_count 事件归类到 tokenEventsByTurn.get(currentTurnId)
+  → 跨 cmdStop 心跳去重(用上次 lastEmittedUsage 比对)
+  → 返回 { tokenEventsByTurn, nextOffset, lastEmittedUsage }
+
+cmdStop:
+  → 取 turn 的 token = tokenEventsByTurn.get(turn.turn_id)
+  → 持久化 nextOffset / lastEmittedUsage 到 state
+  → 清空 events,但保留 state 文件
+```
+
 ---
 
 ## 3. 测试策略
 
 ### 3.1 单元测试(`tests/unit/`)
-- transcript.ts:覆盖 token / system / tool 解析的所有分支
+- transcript.ts:覆盖 token / system / tool 解析的所有分支;含 byteOffset 增量读取场景(三次连续读取分别返回各 turn 数据)
 - replay.ts:turn split / step build / message 构造
 - trust.ts(若适用):hash 算法对照官方实现
+- cli.ts 多 turn 对齐(若适用 C14):模拟 N 次连续 cmdStop,断言每 turn token 字段 1:1 对齐 fixture,且 state 文件未被删除
 
 ### 3.2 E2E(`tests/e2e/`)
 - 用 InMemorySpanExporter + mock SessionState + mock TranscriptData

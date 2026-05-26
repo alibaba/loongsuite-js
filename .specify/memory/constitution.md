@@ -3,9 +3,9 @@
 > 本文件是 OTel GenAI 插件实现的硬约束,由 spec-kit 流程的 review 阶段引用。
 > 任何插件实现违反以下条款,视为缺陷。
 
-**版本**:1.0.0
+**版本**:1.1.0
 **适用范围**:`opentelemetry-instrumentation-<agent>` 系列(claude / codex / 未来新增)
-**最后更新**:2026-05-14
+**最后更新**:2026-05-26
 
 ---
 
@@ -256,6 +256,45 @@ const CONFIG_PATH = path.join(configDir, "otel-config.json");
 **不能硬编码** `~/.<agent>/`。Harbor / CI 等容器化场景通过该环境变量将配置挂载到非默认位置。
 
 **踩过的坑**:claude 插件硬编码 `~/.claude/settings.json`,Harbor 场景设置 `CLAUDE_CONFIG_DIR=/app/config` 后 install 写入位置与 Claude Code 读取位置不一致,hook 无法生效。
+
+---
+
+## C14. Hook 与 Transcript 多数据源对齐:优先用显式关联键
+
+当插件**同时消费 hook 事件流(SessionState)和 transcript 文件**两套数据源,需要把 transcript 中的 LLM/token 数据归属到正确的 hook turn 上时,**对齐策略必须优先选择"显式关联键"**;只有当数据源确实没有可用关联键时,才退化到 fallback 策略,且 fallback 策略必须文档化并经回归测试覆盖。
+
+**禁止**依赖"两个数据流的事件顺序天然对应"做隐式对齐,这种假设在以下任一场景下都会崩坏:Stop hook 按 turn 触发(state 跨 turn 周期不同)、transcript 持久累加(数据源生命周期不同)、同 session 中途装插件(基线偏移)、心跳/重发事件(出现重复)。
+
+### 关联键优先级(从强到弱)
+
+1. **`turn_id` 类显式 ID** — transcript 事件携带与 hook 同名的 turn 标识(codex 的 `task_started.turn_id` / `turn_context.turn_id`)。最可靠
+2. **`message_id` / `response_id`** — transcript 事件携带 LLM 调用粒度的唯一 ID(Anthropic SDK 的 `message.id`)。可靠,但 hook 端通常只能拿到时间戳,需要一次额外的组装
+3. **`byteOffset` 增量边界** — 不依赖事件本身的字段,而是把 transcript 文件的字节偏移作为"已消费水位线"持久化到 state,每次 Stop 只读 nextOffset 之后的字节。**适用于无 ID 但 transcript 单调追加的场景**
+4. **wall-clock 时间窗 / 锚点对齐** — 用 hook 的 PreToolUse / Stop 时间作为锚点,在 transcript 事件序列上做后向配对。**最弱**,只在前 3 种都不可用时使用
+
+### 强制做法
+
+1. **plan 阶段必须回答**:
+   - 本插件用哪种关联键?为什么?
+   - state 在 hook 触发周期(per-turn / per-session)上如何持久化关联水位线?
+2. **跨 hook 调用边界,状态必须透传**:Stop hook 按 turn 触发时,**禁止**用 `clearState` 删除整个 state 文件;改为清空 `events` 数组并保留对齐水位线(`transcript_offset` / `last_consumed_id` / `last_emitted_usage` 等)
+3. **fallback 策略必须显式且可测**:
+   - 关联键命中失败时,代码路径必须有清晰注释说明"为什么这种情况下退化是可接受的"
+   - 回归测试必须覆盖至少一个 fallback 触发场景
+4. **transcript 持久累加场景必须用增量读取**:`parseTranscript(path, byteOffset)` 形式,返回 `nextOffset` 供下次使用;**禁止**每次 Stop 都全量重读 transcript
+
+### 适用范围
+
+仅限**同时**消费 hook 事件流 + transcript 文件的 agent 插件(目前 claude / codex,未来 openclaw 等同架构插件)。
+
+不适用:
+- 仅依赖 hook 数据的插件
+- 仅依赖 transcript 数据的插件
+- 通过 `intercept.js` 等进程内拦截直接拿 LLM payload 的路径(已经是同一数据源)
+
+### 踩过的坑
+
+- **codex(2026-05-25)**:`cmdStop` 末尾 `clearState(sessionId)` 删整个 state 文件,但 codex transcript 是 session 级持久累加的;每次 cmdStop 重建空 state + 全量重读 transcript → 永远从 token 队列**头部** splice → 第二个 turn 起 `usage.input_tokens` / `output_tokens` / `cache_read_tokens` / `total_tokens` 全部固定为 turn 1 的值。修复:`byteOffset` 增量读取 + 利用 codex transcript 自带的 `task_started.turn_id` / `turn_context.turn_id` 做精确分组(`tokenEventsByTurn: Map<turn_id, TokenUsage[]>`),同时用 `last_emitted_usage` 跨 cmdStop 持久化以识别心跳重发事件
 
 ---
 
