@@ -1,4 +1,4 @@
-# loongsuite-js-plugins
+# loongsuite-js
 
 ---
 
@@ -6,7 +6,7 @@
 
 ## ✨ Introduction
 
-[![CI](https://github.com/alibaba/loongsuite-js-plugins/actions/workflows/ci.yml/badge.svg)](https://github.com/alibaba/loongsuite-js-plugins/actions/workflows/ci.yml)
+[![CI](https://github.com/alibaba/loongsuite-js/actions/workflows/ci.yml/badge.svg)](https://github.com/alibaba/loongsuite-js/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org)
 [![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-1.x-blueviolet.svg)](https://opentelemetry.io)
@@ -15,10 +15,10 @@ LoongSuite JS Plugins is a key component of LoongSuite, Alibaba's unified observ
 
 LoongSuite includes the following key components:
 * [LoongCollector](https://github.com/alibaba/loongcollector): universal node agent, which provides log collection, Prometheus metric collection, and network and security collection capabilities based on eBPF.
-* [LoongSuite Python Agent](https://github.com/alibaba/loongsuite-python-agent): a process agent providing instrumentation for Python applications.
-* [LoongSuite Go Agent](https://github.com/alibaba/loongsuite-go-agent): a process agent for Golang with compile time instrumentation.
+* [LoongSuite Python Agent](https://github.com/alibaba/loongsuite-python): a process agent providing instrumentation for Python applications.
+* [LoongSuite Go Agent](https://github.com/alibaba/loongsuite-go): a process agent for Golang with compile time instrumentation.
 * [LoongSuite Java Agent](https://github.com/alibaba/loongsuite-java-agent): a process agent for Java applications.
-* [LoongSuite JS Plugins](https://github.com/alibaba/loongsuite-js-plugins): OpenTelemetry instrumentation plugins for JavaScript-based AI coding agents.
+* [LoongSuite JS Plugins](https://github.com/alibaba/loongsuite-js): OpenTelemetry instrumentation plugins for JavaScript-based AI coding agents.
 * Other upcoming language agents.
 
 ---
@@ -78,7 +78,7 @@ curl -fsSL https://arms-apm-cn-hangzhou-pre.oss-cn-hangzhou.aliyuncs.com/opentel
 ## 🏗️ Repository Structure
 
 ```
-loongsuite-js-plugins/
+loongsuite-js/
 ├── opentelemetry-instrumentation-claude/   # Claude Code plugin (JavaScript)
 │   ├── src/                                # Core source files
 │   ├── test/                               # Jest test suite (101 tests)
@@ -103,8 +103,8 @@ loongsuite-js-plugins/
 ### Clone and set up
 
 ```bash
-git clone https://github.com/alibaba/loongsuite-js-plugins.git
-cd loongsuite-js-plugins
+git clone https://github.com/alibaba/loongsuite-js.git
+cd loongsuite-js
 
 # Claude plugin
 cd opentelemetry-instrumentation-claude

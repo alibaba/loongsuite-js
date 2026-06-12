@@ -71,8 +71,8 @@ postinstall 脚本自动完成所有配置：hooks 注册、intercept.js 复制�
 ### 方式二：源码安装（git clone）
 
 ```bash
-git clone https://github.com/alibaba/loongsuite-js-plugins.git
-cd loongsuite-js-plugins/opentelemetry-instrumentation-claude
+git clone https://github.com/alibaba/loongsuite-js.git
+cd loongsuite-js/opentelemetry-instrumentation-claude
 bash scripts/install.sh
 ```
 

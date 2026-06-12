@@ -4,7 +4,7 @@
 > 字段标 ⭐ 必填,标 ⚪ 可选/有默认。
 
 **Feature ID**:1xx-instrumentation-<AGENT>(从 specs/ 现有最大编号 +1)
-**目标仓库**:`alibaba/loongsuite-js-plugins`
+**目标仓库**:`alibaba/loongsuite-js`
 **插件包名**:`@loongsuite/opentelemetry-instrumentation-<AGENT>`
 **创建日期**:YYYY-MM-DD
 **状态**:Draft / Reviewed / Implementing / Done

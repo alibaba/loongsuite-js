@@ -132,4 +132,4 @@ skill 会:
 
 ## 总验收
 
-5 道关全 PASS → 进 PR/CR 创建阶段(`gh pr create --repo alibaba/loongsuite-js-plugins`)。
+5 道关全 PASS → 进 PR/CR 创建阶段(`gh pr create --repo alibaba/loongsuite-js`)。
