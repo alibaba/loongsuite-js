@@ -1104,7 +1104,7 @@ const armsTracePlugin: OpenClawPlugin = {
       // Wait for model_call_ended to deliver TTFB before closing the span.
       // Skipped entirely when the hook was not registered (old OpenClaw),
       // avoiding unnecessary 200ms delay on every LLM span.
-      if (ctx.modelCallTtfbMs == null && modelCallEndedRegistered) {
+      if (ctx.modelCallTtfbMs == null && modelCallEndedSupported) {
         await Promise.race([
           new Promise<void>((resolve) => { ctx.modelCallTtfbNotify = resolve; }),
           new Promise<void>((resolve) => setTimeout(resolve, 200)),
@@ -1969,12 +1969,12 @@ const armsTracePlugin: OpenClawPlugin = {
     // -- Hook: model_call_ended (OpenClaw >= 2026.4.27) ----------------------
     // Silently ignored on older hosts that don't recognize this hook name.
 
-    let modelCallEndedRegistered = false;
+    let modelCallEndedSupported = false;
     if (shouldHookEnabled("model_call_ended")) {
-      modelCallEndedRegistered = true;
       api.on(
         "model_call_ended",
         async (event: ModelCallEndedEvent, hookCtx: PluginHookContext) => {
+          modelCallEndedSupported = true;
           if (event.outcome !== "completed") return;
           if (event.timeToFirstByteMs == null || !(event.timeToFirstByteMs >= 0)) return;
 
