@@ -6,12 +6,12 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/alibaba/loongsuite-js-plugins.git",
+    "url": "https://github.com/alibaba/loongsuite-js.git",
     "directory": "opentelemetry-util-genai"
   },
-  "homepage": "https://github.com/alibaba/loongsuite-js-plugins/tree/main/opentelemetry-util-genai#readme",
+  "homepage": "https://github.com/alibaba/loongsuite-js/tree/main/opentelemetry-util-genai#readme",
   "bugs": {
-    "url": "https://github.com/alibaba/loongsuite-js-plugins/issues"
+    "url": "https://github.com/alibaba/loongsuite-js/issues"
   },
   "keywords": [
     "opentelemetry",

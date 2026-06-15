@@ -4,8 +4,8 @@
 
 1. Clone the repo and `cd` into the plugin directory:
    ```bash
-   git clone https://github.com/alibaba/loongsuite-js-plugins.git
-   cd loongsuite-js-plugins/opentelemetry-instrumentation-openclaw
+   git clone https://github.com/alibaba/loongsuite-js.git
+   cd loongsuite-js/opentelemetry-instrumentation-openclaw
    ```
 
 2. Install dependencies:

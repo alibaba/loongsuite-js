@@ -199,4 +199,4 @@
 - [ ] Constitution C1-C10 全部对齐
 - [ ] spec 1.4 必采属性清单 100% 覆盖
 - [ ] 5 道验证关全 PASS(含真实 ARMS)
-- [ ] PR 创建到 alibaba/loongsuite-js-plugins
+- [ ] PR 创建到 alibaba/loongsuite-js
