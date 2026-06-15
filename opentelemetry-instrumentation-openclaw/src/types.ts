@@ -55,6 +55,15 @@ export interface ArmsTraceConfig {
   propagationTargetUrls?: string[];
   resourceAttributes?: Record<string, string>;
   globalSpanAttributes?: Record<string, string | number | boolean>;
+
+  // Event-level JSONL emission (for loongsuite-pilot integration).
+  // When enabled, the plugin writes each LLM/tool event as a JSONL line
+  // to <log_dir>/openclaw-YYYY-MM-DD.jsonl in event_t schema, in addition
+  // to the OTLP trace export. Both paths are independent.
+  log_enabled?: boolean;
+  log_dir?: string;
+  log_filename_format?: "hook";
+  captureMessageContent?: boolean;
 }
 
 export type SpanType =

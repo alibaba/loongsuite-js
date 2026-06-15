@@ -196,6 +196,58 @@ For `resourceAttributes`, config file values override environment variable value
 
 ---
 
+## Event-level JSONL Output (loongsuite-pilot Integration)
+
+In addition to OTLP traces, the plugin can emit each LLM/tool event as a JSONL line in the [`event_t` schema](https://code.alibaba-inc.com/yt348264/ai-agent-audit/blob/main/docs/guide/architecture.md), suitable for ingestion by [`loongsuite-pilot`](https://github.com/sls-loongsuite/loongsuite-pilot) (SLS / JSONL / HTTP fan-out).
+
+### Modes
+
+| `endpoint` | `log_enabled` | Behavior |
+|---|---|---|
+| set | unset / false | OTLP-only (existing default behavior) |
+| unset | true | JSONL-only (no OTLP) |
+| set | true | Dual-mode (both paths run independently) |
+| unset | unset / false | Plugin refuses to activate |
+
+### Shared config: `~/.openclaw/otel-config.json`
+
+Used by both pilot installer and the plugin (independent of `~/.openclaw/openclaw.json`).
+
+```json
+{
+  "log_enabled": true,
+  "log_dir": "~/.loongsuite-pilot/logs/openclaw",
+  "log_filename_format": "hook",
+  "captureMessageContent": false
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `log_enabled` | boolean | `false` | Enable JSONL emission |
+| `log_dir` | string | — | Output directory; supports `~` expansion |
+| `log_filename_format` | string | `"hook"` | Output filename format. Currently only `"hook"` is supported, producing `<log_dir>/openclaw-YYYY-MM-DD.jsonl` |
+| `captureMessageContent` | boolean | `false` | When `true`, include `gen_ai.input.messages` / `gen_ai.output.messages` in JSONL records |
+
+Plugin-config priority for any field: `openclaw.json plugins.entries.config` > `~/.openclaw/otel-config.json` > env > default.
+
+### Environment variables
+
+| Variable | Equivalent |
+|---|---|
+| `OPENCLAW_LOG_ENABLED` | `log_enabled` |
+| `OPENCLAW_LOG_DIR` | `log_dir` |
+| `OPENCLAW_CAPTURE_MESSAGE_CONTENT` | `captureMessageContent` |
+| `OPENCLAW_TELEMETRY_DEBUG` | `debug` (JSONL-only mode) |
+
+### JSONL schema (per record)
+
+Each record is one JSON object with `event.name` ∈ `{llm.request, llm.response, tool.call, tool.result}`. Required fields: `time_unix_nano`, `event.id`, `event.name`, `session.id`, `user.id`, `agent.type` (always `"openclaw"`), `turn.id`, `step.id`. Optional fields per event type include `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result`, `tool.result.duration`, `tool.result.status`, `error.type`, `error.message`.
+
+Files are appended via `fs.appendFileSync`; write failures are logged at warn-level and never propagate to the gateway.
+
+---
+
 ## Uninstall
 
 ```bash

@@ -2,6 +2,24 @@
 
 本文档记录 `opentelemetry-instrumentation-openclaw` 的重要变更。
 
+## [0.1.4-beta] - 2026-05-15
+
+### 新增
+
+- **事件级 JSONL 输出**:与 `loongsuite-pilot` 集成的事件级数据通道。在 OTLP trace 上报之外,插件可同时把每条 LLM/工具事件按 `event_t` schema 写入本地 JSONL 文件,供 pilot 增量读取并扇出到 SLS / JSONL / HTTP。
+  - 配置字段:`log_enabled` / `log_dir` / `log_filename_format`(目前仅支持 `'hook'`)/ `captureMessageContent`
+  - 共享配置文件:`~/.openclaw/otel-config.json`(供插件与 pilot 协商;`captureMessageContent=false` 默认不写消息内容)
+  - 环境变量降级:`OPENCLAW_LOG_ENABLED` / `OPENCLAW_LOG_DIR` / `OPENCLAW_CAPTURE_MESSAGE_CONTENT` / `OPENCLAW_TELEMETRY_DEBUG`
+  - 工作模式:`endpoint` 与 `log_enabled` 至少一项必填;两者可同时启用(双模式),也可单独启用 JSONL 路径(无需 OTLP endpoint)
+  - 文件命名:`<log_dir>/openclaw-YYYY-MM-DD.jsonl`,与 pilot `BaseHookInput` 的 hook 模式对齐
+  - 新增 `src/jsonl-emitter.ts`:JSONL 写盘 + event_t 字段构造工具
+  - 新增 `src/jsonl-hooks.ts`:独立 hook 监听器集,与 OTLP trace 路径完全解耦
+
+### 测试
+
+- 新增 `test/jsonl-emitter.test.ts`(14 个用例,覆盖字段构造、写盘、错误兜底、共享 config 解析)
+- 新增 `test/integration-jsonl.test.ts`(4 个端到端用例,模拟一轮 LLM + tool 调用、双触发去重、消息内容采集开关、跨轮 step 自增)
+
 ## [0.1.3-beta] - 2026-05-07
 
 ### 背景

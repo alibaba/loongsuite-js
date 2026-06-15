@@ -68,6 +68,8 @@ import {
   GEN_AI_OUTPUT_MESSAGES,
   ERROR_TYPE,
 } from "@loongsuite/opentelemetry-util-genai";
+import { JsonlEmitter, readSharedOtelConfig } from "./jsonl-emitter.js";
+import { registerJsonlHooks } from "./jsonl-hooks.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -386,7 +388,14 @@ const armsTracePlugin: OpenClawPlugin = {
   activate(api: OpenClawPluginApi) {
     const pluginConfig = asRecord(api.pluginConfig) || {};
     const legacyConfig = getPluginEntryConfig(api.config, LEGACY_PLUGIN_ID);
-    const resolvedConfig = mergeDefinedValues(legacyConfig || {}, pluginConfig);
+    // Shared otel-config.json is the pilot integration contract: pilot installer
+    // writes log_dir/log_enabled there; users may also place their own settings.
+    // Priority: pluginConfig (openclaw.json plugins.entries) > otel-config.json > env > default.
+    const sharedOtelConfig = readSharedOtelConfig("~/.openclaw/otel-config.json");
+    const resolvedConfig = mergeDefinedValues(
+      mergeDefinedValues(legacyConfig || {}, sharedOtelConfig),
+      pluginConfig,
+    );
     const endpoint = pluginConfig.endpoint as string | undefined;
     const endpointResolved = resolvedConfig.endpoint as string | undefined;
 
@@ -412,9 +421,62 @@ const armsTracePlugin: OpenClawPlugin = {
       );
     }
 
-    if (!finalEndpoint) {
+    // Resolve JSONL emission settings (independent of OTLP).
+    const finalLogEnabled =
+      (resolvedConfig.log_enabled as boolean | undefined) ??
+      (process.env.OPENCLAW_LOG_ENABLED === "true"
+        || process.env.OPENCLAW_LOG_ENABLED === "1"
+        || false);
+    const finalLogDir =
+      (resolvedConfig.log_dir as string | undefined)
+      || process.env.OPENCLAW_LOG_DIR
+      || "";
+    const finalLogFilenameFormat =
+      ((resolvedConfig.log_filename_format as string | undefined) === "hook"
+        ? "hook"
+        : "hook") as "hook";
+    const finalCaptureMessageContent =
+      (resolvedConfig.captureMessageContent as boolean | undefined)
+      || process.env.OPENCLAW_CAPTURE_MESSAGE_CONTENT === "true"
+      || process.env.OPENCLAW_CAPTURE_MESSAGE_CONTENT === "1"
+      || false;
+
+    if (!finalEndpoint && !finalLogEnabled) {
       api.logger.error(
-        "[ArmsTrace] Missing required configuration: 'endpoint' must be provided (config or ARMS_OTLP_ENDPOINT env)",
+        "[ArmsTrace] Missing required configuration: at least one of 'endpoint' (OTLP) or 'log_enabled' (JSONL for pilot) must be provided",
+      );
+      return;
+    }
+
+    // JSONL-only mode: register JSONL hook listeners and skip OTLP setup.
+    if (!finalEndpoint && finalLogEnabled) {
+      if (!finalLogDir) {
+        api.logger.error(
+          "[ArmsTrace] log_enabled=true but 'log_dir' is missing (config or OPENCLAW_LOG_DIR env)",
+        );
+        return;
+      }
+      const finalDebugJsonlOnly =
+        (resolvedConfig.debug as boolean | undefined)
+        || process.env.OPENCLAW_TELEMETRY_DEBUG === "true"
+        || process.env.OPENCLAW_TELEMETRY_DEBUG === "1"
+        || false;
+      const jsonlOnlyEmitter = new JsonlEmitter({
+        logDir: finalLogDir,
+        filenameFormat: finalLogFilenameFormat,
+        captureMessageContent: finalCaptureMessageContent,
+        logger: api.logger,
+      });
+      const enabledHooksList = resolvedConfig.enabledHooks as string[] | undefined;
+      const disposeJsonlHooks = registerJsonlHooks(api, jsonlOnlyEmitter, {
+        enabledHooks: enabledHooksList,
+        debug: finalDebugJsonlOnly,
+      });
+      api.on("gateway_stop", () => {
+        try { disposeJsonlHooks(); } catch { /* ignore */ }
+      });
+      api.logger.info(
+        `[ArmsTrace] Plugin activated in JSONL-only mode (log_dir: ${finalLogDir})`,
       );
       return;
     }
@@ -465,6 +527,32 @@ const armsTracePlugin: OpenClawPlugin = {
     };
 
     const exporter = new ArmsExporter(api, config);
+
+    // Dual-mode: when log_enabled is true alongside OTLP, register a parallel
+    // JSONL hook-listener set so pilot can ingest event-level JSONL while
+    // OTLP traces go to the configured backend.
+    let disposeJsonlInDualMode: (() => void) | null = null;
+    if (finalLogEnabled) {
+      if (finalLogDir) {
+        const dualModeEmitter = new JsonlEmitter({
+          logDir: finalLogDir,
+          filenameFormat: finalLogFilenameFormat,
+          captureMessageContent: finalCaptureMessageContent,
+          logger: api.logger,
+        });
+        disposeJsonlInDualMode = registerJsonlHooks(api, dualModeEmitter, {
+          enabledHooks: config.enabledHooks,
+          debug: config.debug,
+        });
+        api.logger.info(
+          `[ArmsTrace] JSONL emission enabled (log_dir: ${finalLogDir})`,
+        );
+      } else {
+        api.logger.warn(
+          "[ArmsTrace] log_enabled=true but log_dir is missing; JSONL emission disabled",
+        );
+      }
+    }
 
     if (config.enableTracePropagation) {
       installPropagation({
@@ -1347,6 +1435,9 @@ const armsTracePlugin: OpenClawPlugin = {
       }
       pendingToolCalls.clear();
       pendingAssistantByTraceId.clear();
+      if (disposeJsonlInDualMode) {
+        try { disposeJsonlInDualMode(); } catch { /* ignore */ }
+      }
       await exporter.dispose();
     });
 
