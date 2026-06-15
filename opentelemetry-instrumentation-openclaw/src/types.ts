@@ -132,6 +132,7 @@ export interface LlmInputEvent {
   prompt: string;
   historyMessages: Array<{ role: string; content: unknown }>;
   imagesCount: number;
+  tools?: unknown[];
 }
 
 export interface LlmOutputEvent {
@@ -167,6 +168,23 @@ export interface AfterToolCallEvent {
   result?: unknown;
   error?: string;
   durationMs?: number;
+}
+
+export interface ModelCallEndedEvent {
+  runId: string;
+  callId: string;
+  sessionKey?: string;
+  sessionId?: string;
+  provider: string;
+  model: string;
+  api?: string;
+  transport?: string;
+  durationMs: number;
+  outcome: "completed" | "error";
+  errorCategory?: string;
+  timeToFirstByteMs?: number;
+  requestPayloadBytes?: number;
+  responseStreamBytes?: number;
 }
 
 export interface BeforeAgentStartEvent {

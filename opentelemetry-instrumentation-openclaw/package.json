@@ -1,6 +1,6 @@
 {
   "name": "@loongsuite/opentelemetry-instrumentation-openclaw",
-  "version": "0.1.3-beta",
+  "version": "0.1.4-beta",
   "description": "OpenTelemetry instrumentation for OpenClaw — report AI agent execution traces to any OTLP-compatible backend",
   "type": "module",
   "license": "Apache-2.0",

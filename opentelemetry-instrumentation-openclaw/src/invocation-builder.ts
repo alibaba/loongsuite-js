@@ -10,6 +10,7 @@ import type {
   InvokeAgentInvocation,
   ReactStepInvocation,
   ExecuteToolInvocation,
+  ToolDefinition,
 } from "@loongsuite/opentelemetry-util-genai";
 import {
   createLLMInvocation,
@@ -126,6 +127,7 @@ export interface LlmBuildParams {
   outputContent?: unknown;
   outputTexts?: string[];
   stopReason?: string;
+  toolDefinitions?: ToolDefinition[];
 }
 
 export interface OpenclawContext {
@@ -134,6 +136,7 @@ export interface OpenclawContext {
   channelId: string;
   runId: string;
   turnId: string;
+  agentName?: string;
 }
 
 export function buildLlmInvocation(
@@ -166,6 +169,7 @@ export function buildLlmInvocation(
     inputMessages,
     outputMessages,
     systemInstruction,
+    toolDefinitions: params.toolDefinitions,
     inputTokens: params.inputTokens ?? 0,
     outputTokens: params.outputTokens ?? 0,
     usageCacheReadInputTokens: params.cacheReadTokens ?? 0,
@@ -178,6 +182,7 @@ export function buildLlmInvocation(
       "gen_ai.session.id": octx.sessionId || octx.channelId,
       "openclaw.run.id": octx.runId,
       "openclaw.turn.id": octx.turnId,
+      ...(octx.agentName ? { "gen_ai.agent.name": octx.agentName } : {}),
     },
   });
 }
@@ -186,20 +191,24 @@ export function buildEntryInvocation(
   octx: OpenclawContext,
   options: { userId?: string; role?: string; from?: string } = {},
 ): EntryInvocation {
+  const attrs: Record<string, unknown> = {
+    "gen_ai.operation.name": "enter",
+    "gen_ai.user.id": options.userId || "unknown",
+    "openclaw.session.id": octx.sessionId || octx.channelId,
+    "gen_ai.session.id": octx.sessionId || octx.channelId,
+    "openclaw.run.id": octx.runId,
+    "openclaw.turn.id": octx.turnId,
+    "openclaw.message.role": options.role || "unknown",
+    "openclaw.message.from": options.from || "unknown",
+    "openclaw.version": octx.openclawVersion,
+  };
+  if (octx.agentName) {
+    attrs["gen_ai.agent.name"] = octx.agentName;
+  }
   return createEntryInvocation({
     sessionId: octx.sessionId || octx.channelId,
     userId: options.userId || "unknown",
-    attributes: {
-      "gen_ai.operation.name": "enter",
-      "gen_ai.user.id": options.userId || "unknown",
-      "openclaw.session.id": octx.sessionId || octx.channelId,
-      "gen_ai.session.id": octx.sessionId || octx.channelId,
-      "openclaw.run.id": octx.runId,
-      "openclaw.turn.id": octx.turnId,
-      "openclaw.message.role": options.role || "unknown",
-      "openclaw.message.from": options.from || "unknown",
-      "openclaw.version": octx.openclawVersion,
-    },
+    attributes: attrs,
   });
 }
 
@@ -238,6 +247,7 @@ export function buildStepInvocation(
       "openclaw.run.id": octx.runId,
       "openclaw.turn.id": octx.turnId,
       "openclaw.version": octx.openclawVersion,
+      ...(octx.agentName ? { "gen_ai.agent.name": octx.agentName } : {}),
     },
   });
 }
@@ -262,6 +272,9 @@ export function buildToolInvocation(
     "openclaw.run.id": octx.runId,
     "openclaw.turn.id": octx.turnId,
   };
+  if (octx.agentName) {
+    attrs["gen_ai.agent.name"] = octx.agentName;
+  }
 
   return createExecuteToolInvocation(toolName, {
     toolCallId,

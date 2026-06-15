@@ -4,15 +4,15 @@ OpenClaw plugin — report AI Agent execution traces to any OTLP-compatible back
 
 Spans follow the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/):
 
-| Span | gen_ai.span.kind | Description |
-|------|-----------------|-------------|
-| `enter_ai_application_system` | ENTRY | Request entry point |
-| `invoke_agent` | AGENT | Agent invocation |
-| `react` | STEP | ReAct reasoning step |
-| `chat` | LLM | LLM call |
-| `execute_tool` | TOOL | Tool execution |
-| `session_start` / `session_end` | — | Session lifecycle |
-| `gateway_start` / `gateway_stop` | — | Gateway lifecycle |
+| Span | gen_ai.span.kind | Key Attributes | Description |
+|------|-----------------|----------------|-------------|
+| `enter_ai_application_system` | ENTRY | `gen_ai.agent.name` | Request entry point |
+| `invoke_agent` | AGENT | `gen_ai.agent.name`, `gen_ai.agent.id` | Agent invocation |
+| `react` | STEP | `gen_ai.agent.name`, `gen_ai.react.round` | ReAct reasoning step |
+| `chat` | LLM | `gen_ai.agent.name`, `gen_ai.tool.definitions`, `gen_ai.response.time_to_first_token` | LLM call |
+| `execute_tool` | TOOL | `gen_ai.agent.name`, `gen_ai.tool.name`, `gen_ai.tool.call.id` | Tool execution |
+| `session_start` / `session_end` | — | | Session lifecycle |
+| `gateway_start` / `gateway_stop` | — | | Gateway lifecycle |
 
 Typical trace tree:
 
@@ -263,7 +263,7 @@ If you prefer to configure manually, edit `~/.openclaw/openclaw.json`:
 |---|---|---|---|
 | `endpoint` | string | — | OTLP endpoint URL (required) |
 | `headers` | object | `{}` | HTTP headers for OTLP authentication |
-| `serviceName` | string | `"openclaw-agent"` | Service name in traces |
+| `serviceName` | string | env fallback | Service name in traces (falls back to `ARMS_SERVICE_NAME` / `OTEL_SERVICE_NAME`) |
 | `debug` | boolean | `false` | Enable debug logging |
 | `batchSize` | number | `10` | Spans buffered before export |
 | `flushIntervalMs` | number | `5000` | Max buffer wait time (ms) |
@@ -271,7 +271,23 @@ If you prefer to configure manually, edit `~/.openclaw/openclaw.json`:
 | `propagationTargetUrls` | string[] | — | URL substrings for outbound `traceparent` injection |
 | `resourceAttributes` | object | — | Custom resource attributes (merged into OTel Resource) |
 | `globalSpanAttributes` | object | — | Custom attributes injected into every span |
-| `enabledHooks` | string[] | — | Restrict which hooks are active (all if omitted) |
+| `enabledHooks` | string[] | — | Restrict which hooks are active (all if omitted). Recognized hooks: `gateway_start`, `message_received`, `message_sending`, `message_sent`, `llm_input`, `llm_output`, `before_tool_call`, `after_tool_call`, `model_call_ended`, `before_agent_start`, `agent_end`, `session_start`, `session_end`, `before_message_write` |
+
+### Version Compatibility
+
+| Attribute | Minimum OpenClaw Version | Degradation |
+|---|---|---|
+| `gen_ai.tool.definitions` | 2026.5.14 | Older versions omit `tools` in `llm_input` — attribute silently skipped |
+| `gen_ai.response.time_to_first_token` | 2026.4.27 | Older versions lack `model_call_ended` hook — registered but never fired |
+| `gen_ai.agent.name` | All versions | Always available via `hookCtx.agentId` |
+
+### Instrumentation Scope
+
+All spans are emitted under:
+
+- **`otel.scope.name`**: `aliyun.opentelemetry.instrumentation.openclaw`
+
+This follows the cross-language naming convention established in ARMS probes (Python: `aliyun.opentelemetry.instrumentation.*`, Java: `io.opentelemetry.*`, Go: `github.com/alibaba/loongsuite-go-agent/...`).
 
 > **Note**: Set `diagnostics.otel.traces: false` to avoid duplicate traces — `opentelemetry-instrumentation-openclaw` already handles trace reporting.
 

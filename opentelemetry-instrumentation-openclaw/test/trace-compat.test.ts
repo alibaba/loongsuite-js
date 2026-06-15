@@ -372,8 +372,8 @@ describe("trace-compat: regression baseline", () => {
         },
       });
 
-      // Allow enqueued trace tasks to run
-      await vi.advanceTimersByTimeAsync(50);
+      // Allow enqueued trace tasks + TTFB wait timeout to run
+      await vi.advanceTimersByTimeAsync(250);
 
       // agent_end
       await api.fire("agent_end", {
@@ -386,7 +386,7 @@ describe("trace-compat: regression baseline", () => {
       });
 
       // Wait for the setTimeout(100) inside agent_end
-      await vi.advanceTimersByTimeAsync(200);
+      await vi.advanceTimersByTimeAsync(250);
 
       // -- L1: Structure --
       assertL1Structure([
@@ -506,7 +506,7 @@ describe("trace-compat: regression baseline", () => {
           usage: { input: 15, output: 8 },
         },
       });
-      await vi.advanceTimersByTimeAsync(50);
+      await vi.advanceTimersByTimeAsync(250);
 
       // before_tool_call
       await api.fire("before_tool_call", {
@@ -550,7 +550,7 @@ describe("trace-compat: regression baseline", () => {
           usage: { input: 30, output: 12 },
         },
       });
-      await vi.advanceTimersByTimeAsync(50);
+      await vi.advanceTimersByTimeAsync(250);
 
       // agent_end
       await api.fire("agent_end", {
@@ -665,7 +665,8 @@ describe("trace-compat: regression baseline", () => {
         historyMessages: [],
         imagesCount: 0,
       });
-      await vi.advanceTimersByTimeAsync(100);
+      // 200ms+ to cover the TTFB wait timeout inside exportPendingLlmSpan
+      await vi.advanceTimersByTimeAsync(250);
 
       // Now there should be an LLM span
       const llmAfter = spansByName(/^chat /);
@@ -756,7 +757,7 @@ describe("trace-compat: regression baseline", () => {
           usage: { input: 10, output: 8 },
         },
       });
-      await vi.advanceTimersByTimeAsync(50);
+      await vi.advanceTimersByTimeAsync(250);
 
       // agent_end
       await api.fire("agent_end", {
@@ -767,7 +768,7 @@ describe("trace-compat: regression baseline", () => {
         success: true,
         durationMs: 400,
       });
-      await vi.advanceTimersByTimeAsync(200);
+      await vi.advanceTimersByTimeAsync(250);
 
       // Verify the LLM span carries the rebound runId
       const llmSpan = spansByName(/^chat /)[0];
@@ -843,7 +844,7 @@ describe("trace-compat: regression baseline", () => {
           usage: { input: 5, output: 3 },
         },
       });
-      await vi.advanceTimersByTimeAsync(50);
+      await vi.advanceTimersByTimeAsync(250);
 
       const spansBeforeAgentEnd = capturedSpans.length;
 
@@ -861,8 +862,8 @@ describe("trace-compat: regression baseline", () => {
       // (They are applied inside the setTimeout callback in agent_end)
       const spansAfterAgentEndSync = capturedSpans.length;
 
-      // Advance past the 100ms setTimeout
-      await vi.advanceTimersByTimeAsync(200);
+      // Advance past the 100ms setTimeout + TTFB wait
+      await vi.advanceTimersByTimeAsync(250);
 
       // After setTimeout: span count should have increased
       // (entry span start counted, agent span start counted, both now ended)
@@ -959,12 +960,12 @@ describe("trace-compat: regression baseline", () => {
         },
       });
 
-      // Allow agent_end polling loop (50ms tick) to detect LLM completion
-      await vi.advanceTimersByTimeAsync(100);
+      // Allow TTFB wait timeout + agent_end polling loop to detect LLM completion
+      await vi.advanceTimersByTimeAsync(250);
       await firePromise;
 
       // Drain agent_end's setTimeout(100) closing Entry/Agent
-      await vi.advanceTimersByTimeAsync(200);
+      await vi.advanceTimersByTimeAsync(250);
 
       const entrySpan = spansByName("enter_ai_application_system")[0];
       const agentSpan = spansByName(/^invoke_agent/)[0];
@@ -994,6 +995,482 @@ describe("trace-compat: regression baseline", () => {
       // Parent-child monotonicity for the whole chain
       expect((agentSpan.endTime ?? 0) >= (stepSpan.endTime ?? 0)).toBe(true);
       expect((entrySpan.endTime ?? 0) >= (agentSpan.endTime ?? 0)).toBe(true);
+    });
+  });
+
+  // =========================================================================
+  // Flow 7: tool definitions and time_to_first_token
+  // =========================================================================
+  describe("Flow 7: tool definitions and time_to_first_token", () => {
+    it("LLM span contains gen_ai.tool.definitions and gen_ai.response.time_to_first_token", async () => {
+      const api = makeApi();
+      armsTracePlugin.activate(api);
+
+      const baseTime = Date.now();
+
+      await api.fire("message_received", {
+        from: "user-1",
+        content: "Check weather",
+        timestamp: baseTime,
+      });
+      await api.fire("before_agent_start", { prompt: "Check weather", messages: [] });
+
+      const tools = [
+        {
+          name: "get_weather",
+          type: "function",
+          description: "Get current weather",
+          parameters: { type: "object", properties: { location: { type: "string" } } },
+        },
+        {
+          name: "search",
+          type: "function",
+          description: "Search the web",
+          parameters: { type: "object" },
+        },
+      ];
+      await api.fire("llm_input", {
+        runId: "run-tool-def-001",
+        sessionId: "sess-td-001",
+        provider: "openai",
+        model: "gpt-4o",
+        systemPrompt: "You are helpful",
+        prompt: "Check weather",
+        historyMessages: [],
+        imagesCount: 0,
+        tools,
+      });
+
+      // Simulate model_call_ended with TTFB
+      await api.fire("model_call_ended", {
+        runId: "run-tool-def-001",
+        callId: "run-tool-def-001:model:1",
+        provider: "openai",
+        model: "gpt-4o",
+        durationMs: 800,
+        outcome: "completed",
+        timeToFirstByteMs: 150,
+      });
+
+      await api.fire("before_message_write", {
+        message: {
+          role: "assistant",
+          content: "The weather is sunny.",
+          timestamp: baseTime + 800,
+          stopReason: "stop",
+          usage: { input: 50, output: 10 },
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(50);
+      await api.fire("agent_end", {
+        messages: [
+          { role: "user", content: "Check weather" },
+          { role: "assistant", content: "The weather is sunny." },
+        ],
+        success: true,
+        durationMs: 1000,
+      });
+      await vi.advanceTimersByTimeAsync(200);
+
+      // -- Assertions --
+
+      const llmSpan = spansByName(/^chat /)[0];
+      expect(llmSpan, "LLM span should exist").toBeDefined();
+
+      // Tool definitions should be serialized as JSON string containing tool names
+      const toolDefs = llmSpan.attributes["gen_ai.tool.definitions"];
+      expect(toolDefs, "gen_ai.tool.definitions should be set").toBeDefined();
+      expect(typeof toolDefs).toBe("string");
+      const parsed = JSON.parse(toolDefs as string);
+      expect(parsed).toHaveLength(2);
+      expect(parsed[0].name).toBe("get_weather");
+      expect(parsed[0].type).toBe("function");
+      expect(parsed[0].description).toBe("Get current weather");
+      expect(parsed[0].parameters).toBeDefined();
+      expect(parsed[1].name).toBe("search");
+
+      // TTFB: 150ms = 150_000_000 nanoseconds
+      const ttft = llmSpan.attributes["gen_ai.response.time_to_first_token"];
+      expect(ttft, "gen_ai.response.time_to_first_token should be set").toBeDefined();
+      expect(ttft).toBe(150_000_000);
+    });
+  });
+
+  // =========================================================================
+  // Flow 8: graceful degradation without tools and model_call_ended
+  // =========================================================================
+  describe("Flow 8: graceful degradation on older OpenClaw versions", () => {
+    it("LLM span omits tool.definitions and time_to_first_token when unavailable", async () => {
+      const api = makeApi();
+      armsTracePlugin.activate(api);
+
+      const baseTime = Date.now();
+
+      await api.fire("message_received", {
+        from: "user-1",
+        content: "Hi",
+        timestamp: baseTime,
+      });
+      await api.fire("before_agent_start", { prompt: "Hi", messages: [] });
+
+      // llm_input without tools field (old OpenClaw)
+      await api.fire("llm_input", {
+        runId: "run-old-001",
+        sessionId: "sess-old-001",
+        provider: "openai",
+        model: "gpt-4o",
+        systemPrompt: "Help",
+        prompt: "Hi",
+        historyMessages: [],
+        imagesCount: 0,
+      });
+
+      // No model_call_ended hook fired (old OpenClaw version)
+
+      await api.fire("before_message_write", {
+        message: {
+          role: "assistant",
+          content: "Hello!",
+          timestamp: baseTime + 300,
+          stopReason: "stop",
+          usage: { input: 5, output: 2 },
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(250);
+      await api.fire("agent_end", {
+        messages: [
+          { role: "user", content: "Hi" },
+          { role: "assistant", content: "Hello!" },
+        ],
+        success: true,
+        durationMs: 500,
+      });
+      await vi.advanceTimersByTimeAsync(250);
+
+      const llmSpan = spansByName(/^chat /)[0];
+      expect(llmSpan, "LLM span should exist").toBeDefined();
+
+      // These attributes should NOT be set
+      expect(llmSpan.attributes["gen_ai.tool.definitions"]).toBeUndefined();
+      expect(llmSpan.attributes["gen_ai.response.time_to_first_token"]).toBeUndefined();
+    });
+  });
+
+  // =========================================================================
+  // Flow 9: gen_ai.agent.name on all GenAI spans + otel.scope.name
+  // =========================================================================
+  describe("Flow 9: gen_ai.agent.name propagation and otel.scope.name", () => {
+    it("all GenAI spans carry gen_ai.agent.name from hookCtx.agentId", async () => {
+      const api = makeApi();
+      armsTracePlugin.activate(api);
+
+      const baseTime = Date.now();
+
+      // message_received does NOT have agentId in its PluginHookMessageContext
+      await api.fire("message_received", {
+        from: "user-1",
+        content: "What's the weather?",
+        timestamp: baseTime,
+      }, { agentId: undefined });
+
+      await api.fire("before_agent_start", {
+        prompt: "What's the weather?",
+        messages: [],
+      }, { agentId: "my-agent" });
+
+      await api.fire("llm_input", {
+        runId: "run-an-001",
+        sessionId: "sess-an-001",
+        provider: "openai",
+        model: "gpt-4o",
+        systemPrompt: "You are helpful.",
+        prompt: "What's the weather?",
+        historyMessages: [],
+        imagesCount: 0,
+      }, { agentId: "my-agent" });
+
+      // Tool call via before_message_write
+      await api.fire("before_message_write", {
+        message: {
+          role: "assistant",
+          content: [
+            { type: "toolCall", id: "call_an1", name: "get_weather", arguments: '{"city":"Beijing"}' },
+          ],
+          timestamp: baseTime + 200,
+          stopReason: "toolUse",
+          usage: { input: 10, output: 5 },
+        },
+      }, { agentId: "my-agent" });
+      await vi.advanceTimersByTimeAsync(250);
+
+      await api.fire("before_tool_call", {
+        toolName: "get_weather",
+        params: { city: "Beijing" },
+        runId: "run-an-001",
+        toolCallId: "call_an1",
+      }, { agentId: "my-agent" });
+
+      await api.fire("after_tool_call", {
+        toolName: "get_weather",
+        params: { city: "Beijing" },
+        runId: "run-an-001",
+        toolCallId: "call_an1",
+        result: '{"temp": 25}',
+        durationMs: 100,
+      }, { agentId: "my-agent" });
+
+      // Second LLM call
+      await api.fire("llm_input", {
+        runId: "run-an-001",
+        sessionId: "sess-an-001",
+        provider: "openai",
+        model: "gpt-4o",
+        prompt: "What's the weather?",
+        historyMessages: [
+          { role: "assistant", content: [{ type: "toolCall", id: "call_an1", name: "get_weather" }] },
+          { role: "toolResult", content: [{ type: "toolResult", toolCallId: "call_an1", content: '{"temp": 25}' }] },
+        ],
+        imagesCount: 0,
+      }, { agentId: "my-agent" });
+
+      await api.fire("before_message_write", {
+        message: {
+          role: "assistant",
+          content: "It's 25°C in Beijing.",
+          timestamp: baseTime + 500,
+          stopReason: "stop",
+          usage: { input: 20, output: 8 },
+        },
+      }, { agentId: "my-agent" });
+
+      await vi.advanceTimersByTimeAsync(250);
+
+      await api.fire("agent_end", {
+        messages: [
+          { role: "user", content: "What's the weather?" },
+          { role: "assistant", content: "It's 25°C in Beijing." },
+        ],
+        success: true,
+        durationMs: 600,
+      }, { agentId: "my-agent" });
+
+      await vi.advanceTimersByTimeAsync(200);
+
+      const entrySpan = spansByName("enter_ai_application_system")[0];
+      const agentSpan = spansByName(/^invoke_agent/)[0];
+      const stepSpans = spansByName("react step");
+      const llmSpans = spansByName(/^chat /);
+      const toolSpan = spansByName(/^execute_tool/)[0];
+
+      expect(entrySpan, "ENTRY span should exist").toBeDefined();
+      expect(agentSpan, "AGENT span should exist").toBeDefined();
+      expect(stepSpans.length, "STEP spans should exist").toBeGreaterThanOrEqual(1);
+      expect(llmSpans.length, "LLM spans should exist").toBeGreaterThanOrEqual(1);
+      expect(toolSpan, "TOOL span should exist").toBeDefined();
+
+      const allSpans: Array<[string, MockSpanRecord]> = [
+        ["ENTRY", entrySpan],
+        ["AGENT", agentSpan],
+        ...stepSpans.map((s, i): [string, MockSpanRecord] => [`STEP[${i}]`, s]),
+        ...llmSpans.map((s, i): [string, MockSpanRecord] => [`LLM[${i}]`, s]),
+        ["TOOL", toolSpan],
+      ];
+
+      for (const [label, span] of allSpans) {
+        expect(
+          span.attributes["gen_ai.agent.name"],
+          `${label} span should have gen_ai.agent.name = "my-agent"`,
+        ).toBe("my-agent");
+      }
+    });
+  });
+
+  // =========================================================================
+  // Flow 10: each LLM span gets its own TTFB
+  // =========================================================================
+  describe("Flow 10: per-LLM-span time_to_first_token", () => {
+    it("each LLM span carries its own TTFB, including the first one", async () => {
+      const api = makeApi();
+      armsTracePlugin.activate(api);
+
+      const baseTime = Date.now();
+
+      await api.fire("message_received", {
+        from: "user-1",
+        content: "Multi-turn test",
+        timestamp: baseTime,
+      });
+      await api.fire("before_agent_start", { prompt: "Multi-turn test", messages: [] });
+
+      // --- 1st LLM call ---
+      await api.fire("llm_input", {
+        runId: "run-ttfb-multi",
+        sessionId: "sess-ttfb-multi",
+        provider: "anthropic",
+        model: "sonnet-4.6",
+        systemPrompt: "You are helpful",
+        prompt: "Multi-turn test",
+        historyMessages: [],
+        imagesCount: 0,
+      });
+
+      // model_call_ended arrives (1st call TTFB = 120ms)
+      await api.fire("model_call_ended", {
+        runId: "run-ttfb-multi",
+        callId: "run-ttfb-multi:model:1",
+        provider: "anthropic",
+        model: "sonnet-4.6",
+        durationMs: 500,
+        outcome: "completed",
+        timeToFirstByteMs: 120,
+      });
+
+      // before_message_write with tool call
+      await api.fire("before_message_write", {
+        message: {
+          role: "assistant",
+          content: [
+            { type: "toolCall", id: "call_t1", name: "search", arguments: '{"q":"test"}' },
+          ],
+          timestamp: baseTime + 500,
+          stopReason: "toolUse",
+          usage: { input: 30, output: 8 },
+        },
+      });
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Tool execution
+      await api.fire("before_tool_call", {
+        toolName: "search",
+        params: { q: "test" },
+        runId: "run-ttfb-multi",
+        toolCallId: "call_t1",
+      });
+      await api.fire("after_tool_call", {
+        toolName: "search",
+        params: { q: "test" },
+        runId: "run-ttfb-multi",
+        toolCallId: "call_t1",
+        result: '{"results": []}',
+        durationMs: 200,
+      });
+
+      // --- 2nd LLM call ---
+      await api.fire("llm_input", {
+        runId: "run-ttfb-multi",
+        sessionId: "sess-ttfb-multi",
+        provider: "anthropic",
+        model: "sonnet-4.6",
+        prompt: "Multi-turn test",
+        historyMessages: [
+          { role: "assistant", content: [{ type: "toolCall", id: "call_t1", name: "search" }] },
+          { role: "toolResult", content: [{ type: "toolResult", toolCallId: "call_t1", content: '{"results": []}' }] },
+        ],
+        imagesCount: 0,
+      });
+
+      // model_call_ended arrives (2nd call TTFB = 250ms)
+      await api.fire("model_call_ended", {
+        runId: "run-ttfb-multi",
+        callId: "run-ttfb-multi:model:2",
+        provider: "anthropic",
+        model: "sonnet-4.6",
+        durationMs: 700,
+        outcome: "completed",
+        timeToFirstByteMs: 250,
+      });
+
+      await api.fire("before_message_write", {
+        message: {
+          role: "assistant",
+          content: "Here are the results.",
+          timestamp: baseTime + 1400,
+          stopReason: "stop",
+          usage: { input: 50, output: 12 },
+        },
+      });
+      await vi.advanceTimersByTimeAsync(100);
+
+      await api.fire("agent_end", {
+        messages: [
+          { role: "user", content: "Multi-turn test" },
+          { role: "assistant", content: "Here are the results." },
+        ],
+        success: true,
+        durationMs: 1500,
+      });
+      await vi.advanceTimersByTimeAsync(200);
+
+      // -- Assertions --
+      const llmSpans = spansByName(/^chat /);
+      expect(llmSpans.length, "should have 2 LLM spans").toBe(2);
+
+      // 1st LLM span: TTFB = 120ms = 120_000_000 ns
+      const ttfb1 = llmSpans[0].attributes["gen_ai.response.time_to_first_token"];
+      expect(ttfb1, "1st LLM span should have TTFB").toBeDefined();
+      expect(ttfb1).toBe(120_000_000);
+
+      // 2nd LLM span: TTFB = 250ms = 250_000_000 ns
+      const ttfb2 = llmSpans[1].attributes["gen_ai.response.time_to_first_token"];
+      expect(ttfb2, "2nd LLM span should have TTFB").toBeDefined();
+      expect(ttfb2).toBe(250_000_000);
+    });
+
+    it("LLM span without model_call_ended omits TTFB gracefully", async () => {
+      const api = makeApi();
+      armsTracePlugin.activate(api);
+
+      const baseTime = Date.now();
+
+      await api.fire("message_received", {
+        from: "user-1",
+        content: "No TTFB test",
+        timestamp: baseTime,
+      });
+      await api.fire("before_agent_start", { prompt: "No TTFB test", messages: [] });
+
+      await api.fire("llm_input", {
+        runId: "run-no-ttfb",
+        sessionId: "sess-no-ttfb",
+        provider: "openai",
+        model: "gpt-4o",
+        systemPrompt: "You are helpful",
+        prompt: "No TTFB test",
+        historyMessages: [],
+        imagesCount: 0,
+      });
+
+      // No model_call_ended fired (old OpenClaw version)
+
+      await api.fire("before_message_write", {
+        message: {
+          role: "assistant",
+          content: "Done.",
+          timestamp: baseTime + 300,
+          stopReason: "stop",
+          usage: { input: 10, output: 3 },
+        },
+      });
+      await vi.advanceTimersByTimeAsync(250);
+
+      await api.fire("agent_end", {
+        messages: [
+          { role: "user", content: "No TTFB test" },
+          { role: "assistant", content: "Done." },
+        ],
+        success: true,
+        durationMs: 400,
+      });
+      await vi.advanceTimersByTimeAsync(250);
+
+      const llmSpan = spansByName(/^chat /)[0];
+      expect(llmSpan, "LLM span should exist").toBeDefined();
+      expect(
+        llmSpan.attributes["gen_ai.response.time_to_first_token"],
+        "TTFB should not be set without model_call_ended",
+      ).toBeUndefined();
     });
   });
 });

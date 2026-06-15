@@ -14,6 +14,7 @@ import type {
   MessageReceivedEvent,
   MessageSendingEvent,
   MessageSentEvent,
+  ModelCallEndedEvent,
   OpenClawPlugin,
   OpenClawPluginApi,
   PluginHookContext,
@@ -30,9 +31,10 @@ import {
   buildStepInvocation,
   type OpenclawContext,
 } from "./invocation-builder.js";
-import type { ReactStepInvocation, InvokeAgentInvocation, EntryInvocation } from "@loongsuite/opentelemetry-util-genai";
+import type { ReactStepInvocation, InvokeAgentInvocation, EntryInvocation, ToolDefinition } from "@loongsuite/opentelemetry-util-genai";
 import {
   compatSerializeMessages,
+  compatSerializeToolDefinitions,
   compatFinishReasons,
   compatSpanKindDialect,
 } from "./invocation-compat.js";
@@ -90,6 +92,7 @@ const TEMP_RUN_ID_PREFIX = "run-";
 const PENDING_ASSISTANT_TTL_MS = 15_000;
 const CANONICAL_PLUGIN_ID = "opentelemetry-instrumentation-openclaw";
 const LEGACY_PLUGIN_ID = "openclaw-cms-plugin";
+const DEFAULT_AGENT_NAME = "openclaw";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -358,6 +361,12 @@ interface TraceContext {
   stepCurrentRound?: number;
   stepAwaitingToolResults: boolean;
 
+  toolDefinitions?: ToolDefinition[];
+  modelCallTtfbMs?: number;
+  modelCallTtfbNotify?: () => void;
+
+  agentName?: string;
+
   customAttributes?: Record<string, string | number | boolean>;
 
   agentStartTime?: number;
@@ -480,7 +489,7 @@ const armsTracePlugin: OpenClawPlugin = {
       const tracerProvider = exporter.getTracerProvider();
       handler = new ExtendedTelemetryHandler({
         tracerProvider: tracerProvider || undefined,
-        instrumentationName: "opentelemetry-instrumentation-openclaw",
+        instrumentationName: "aliyun.opentelemetry.instrumentation.openclaw",
         instrumentationVersion: PLUGIN_VERSION,
       });
       return handler;
@@ -1002,6 +1011,7 @@ const armsTracePlugin: OpenClawPlugin = {
       channelId,
       runId: ctx.runId,
       turnId: ctx.turnId,
+      agentName: ctx.agentName,
     });
 
     const exportPendingLlmSpan = async (
@@ -1052,10 +1062,16 @@ const armsTracePlugin: OpenClawPlugin = {
         outputContent: params.outputContent,
         outputTexts: params.outputTexts,
         stopReason,
+        toolDefinitions: ctx.toolDefinitions,
       });
 
       const msgAttrs = compatSerializeMessages(inv);
       for (const [key, value] of Object.entries(msgAttrs)) {
+        if (value && inv.attributes) inv.attributes[key] = value;
+      }
+
+      const toolDefAttrs = compatSerializeToolDefinitions(inv);
+      for (const [key, value] of Object.entries(toolDefAttrs)) {
         if (value && inv.attributes) inv.attributes[key] = value;
       }
 
@@ -1084,6 +1100,23 @@ const armsTracePlugin: OpenClawPlugin = {
       const h = await ensureHandler();
       const parentCtx = exporter.resolveParentContextFor(resolveStepFirstParentSpanId(ctx));
       h.startLlm(inv, parentCtx, startTime);
+
+      // Wait for model_call_ended to deliver TTFB before closing the span.
+      // Skipped entirely when the hook was not registered (old OpenClaw),
+      // avoiding unnecessary 200ms delay on every LLM span.
+      if (ctx.modelCallTtfbMs == null && modelCallEndedRegistered) {
+        await Promise.race([
+          new Promise<void>((resolve) => { ctx.modelCallTtfbNotify = resolve; }),
+          new Promise<void>((resolve) => setTimeout(resolve, 200)),
+        ]);
+        ctx.modelCallTtfbNotify = undefined;
+      }
+
+      if (ctx.modelCallTtfbMs != null && inv.monotonicStartS != null) {
+        inv.monotonicFirstTokenS = inv.monotonicStartS + ctx.modelCallTtfbMs / 1000;
+      }
+      ctx.modelCallTtfbMs = undefined;
+
       h.stopLlm(inv, safeEndTime);
 
       ctx.lastLlmEndTime =
@@ -1217,6 +1250,7 @@ const armsTracePlugin: OpenClawPlugin = {
       if (ctx.agentSpanId) {
         return;
       }
+      ctx.agentName = agentId;
       const now = Date.now();
       ctx.agentStartTime = now;
       ctx.agentSpanId = generateId(16);
@@ -1571,12 +1605,15 @@ const armsTracePlugin: OpenClawPlugin = {
           // In concurrent/reordered hook delivery, llm_input may arrive before
           // before_agent_start for this run. Ensure parent spans exist so
           // segmented LLM/TOOL spans never become orphan traces.
+          if (!ctx.agentName) {
+            ctx.agentName = hookCtx.agentId || DEFAULT_AGENT_NAME;
+          }
           await ensureEntrySpan(ctx, channelId, {
             userId: (hookCtx.trigger as string) || "system",
             role: (hookCtx.trigger as string) || "system",
-            from: hookCtx.agentId || "openclaw",
+            from: hookCtx.agentId || DEFAULT_AGENT_NAME,
           });
-          await ensureAgentSpan(ctx, channelId, hookCtx.agentId || "openclaw");
+          await ensureAgentSpan(ctx, channelId, hookCtx.agentId || DEFAULT_AGENT_NAME);
 
           ctx.llmProvider = event.provider;
           ctx.llmModel = event.model;
@@ -1605,6 +1642,23 @@ const armsTracePlugin: OpenClawPlugin = {
           ctx.llmPendingRawUserPrompt = event.prompt;
           ctx.llmLastRawInputHistory = historyMsgs;
           ctx.llmLastRawUserPrompt = event.prompt;
+
+          // Capture tool definitions when available (OpenClaw >= 2026.5.14)
+          ctx.toolDefinitions = undefined;
+          ctx.modelCallTtfbMs = undefined;
+          ctx.modelCallTtfbNotify = undefined;
+          if (Array.isArray(event.tools) && event.tools.length > 0) {
+            ctx.toolDefinitions = event.tools
+              .filter((t): t is Record<string, unknown> => t != null && typeof t === "object")
+              .map((t): ToolDefinition => {
+                const name = String(t.name || "");
+                const type = String(t.type || "function");
+                if (type === "function" && t.description != null) {
+                  return { type: "function" as const, name, description: String(t.description), parameters: t.parameters ?? null };
+                }
+                return { type, name };
+              });
+          }
 
           const pendingAssistant = pendingAssistantByTraceId.get(ctx.traceId);
           if (pendingAssistant) {
@@ -1912,6 +1966,35 @@ const armsTracePlugin: OpenClawPlugin = {
       );
     }
 
+    // -- Hook: model_call_ended (OpenClaw >= 2026.4.27) ----------------------
+    // Silently ignored on older hosts that don't recognize this hook name.
+
+    let modelCallEndedRegistered = false;
+    if (shouldHookEnabled("model_call_ended")) {
+      modelCallEndedRegistered = true;
+      api.on(
+        "model_call_ended",
+        async (event: ModelCallEndedEvent, hookCtx: PluginHookContext) => {
+          if (event.outcome !== "completed") return;
+          if (event.timeToFirstByteMs == null || !(event.timeToFirstByteMs >= 0)) return;
+
+          const runId = event.runId;
+          if (!runId) return;
+
+          const ctx = contextByRunId.get(runId);
+          if (!ctx) return;
+
+          ctx.modelCallTtfbMs = event.timeToFirstByteMs;
+          ctx.modelCallTtfbNotify?.();
+          if (config.debug) {
+            api.logger.info(
+              `[ArmsTrace] model_call_ended TTFB captured: ${event.timeToFirstByteMs}ms, runId=${runId}`,
+            );
+          }
+        },
+      );
+    }
+
     // -- Hook: before_agent_start -------------------------------------------
 
     if (shouldHookEnabled("before_agent_start")) {
@@ -1923,12 +2006,16 @@ const armsTracePlugin: OpenClawPlugin = {
         ) => {
           const rawChannelId = resolveChannelId(hookCtx);
           const agentId =
-            hookCtx.agentId || "openclaw";
+            hookCtx.agentId || DEFAULT_AGENT_NAME;
           const { ctx, channelId } = getOrCreateContext(
             rawChannelId,
             undefined,
             "before_agent_start",
           );
+
+          if (!ctx.agentName) {
+            ctx.agentName = agentId;
+          }
 
           // Ensure ENTRY span exists (idempotent: skips if message_received already created one)
           await ensureEntrySpan(ctx, channelId, {
@@ -2023,6 +2110,7 @@ const armsTracePlugin: OpenClawPlugin = {
             const userInput = rootCtx.userInput;
             const traceId = rootCtx.traceId;
             const resolvedSessionId = ctx.sessionId || rootCtx.sessionId;
+            const resolvedAgentName = ctx.agentName;
 
             setTimeout(async () => {
               // By now llm_output / message_sending / message_sent should
@@ -2081,6 +2169,9 @@ const armsTracePlugin: OpenClawPlugin = {
                   rootEndAttrs[GEN_AI_OUTPUT_MESSAGES] = formatOutputMessages(
                     [typeof finalOutput === "string" ? finalOutput : JSON.stringify(finalOutput)],
                   );
+                }
+                if (resolvedAgentName) {
+                  rootEndAttrs["gen_ai.agent.name"] = resolvedAgentName;
                 }
                 const pendingEntryInv = rootCtx.entryInvocation;
                 if (pendingEntryInv && handler) {

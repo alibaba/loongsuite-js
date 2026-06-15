@@ -2,6 +2,42 @@
 
 本文档记录 `opentelemetry-instrumentation-openclaw` 的重要变更。
 
+## [0.1.4-beta] - 2026-05-26
+
+### 新增
+
+- **`gen_ai.tool.definitions` 属性采集**：
+  - 从 `llm_input` hook 的 `tools` 字段提取工具定义列表，序列化为 JSON 写入 LLM span
+  - 包含工具名称、类型、描述和参数 schema
+  - 需要 OpenClaw >= 2026.5.14（低版本 `tools` 字段缺失，静默跳过）
+- **`gen_ai.response.time_to_first_token` 属性采集**：
+  - 新增监听 `model_call_ended` hook，从 `timeToFirstByteMs` 字段提取首包耗时
+  - 转换为纳秒写入 LLM span，符合 OpenTelemetry GenAI 语义规范
+  - 需要 OpenClaw >= 2026.4.27（低版本不触发 `model_call_ended`，静默跳过）
+  - 每个 LLM span 携带各自对应的 TTFB（多次 LLM 调用场景下不再共享同一值）
+  - 通过 Promise 通知 + 200ms 超时兜底确保首个 LLM span 也能获取到 TTFB
+  - 老版本 OpenClaw（不支持 `model_call_ended`）自动跳过等待，零额外延迟
+- **`gen_ai.agent.name` 属性传播至所有 GenAI span**：
+  - 所有 GenAI span（ENTRY、AGENT、STEP、LLM、TOOL）均携带 `gen_ai.agent.name` 属性
+  - 值来源于 `hookCtx.agentId`，在 `TraceContext` 生命周期内一致
+  - 符合 ARMS GenAI 语义规范中"有条件时必须"的要求
+
+### ⚠️ Breaking Changes
+
+- **`otel.scope.name` 变更为 `aliyun.opentelemetry.instrumentation.openclaw`**：
+  - 原值 `opentelemetry-instrumentation-openclaw`，现对齐跨语言探针命名规范
+  - 同时变更 `ArmsExporter` 和 `ExtendedTelemetryHandler` 两处 tracer 创建的 scope name
+  - **注意**：如有基于 `otel.scope.name` 的告警规则或 dashboard 查询，需同步更新
+
+### 说明
+
+- 在不支持 `model_call_ended` hook 的 OpenClaw 老版本上，`registerTypedHook()` 仅产生 warn 级别诊断日志，不影响插件加载和其他 hook 的正常工作
+- 在 `llm_input` 不包含 `tools` 字段的老版本上，插件通过 nullish 检查静默降级
+- 新增集成测试 Flow 7（工具定义 + TTFB）、Flow 8（向后兼容降级）和 Flow 9（`gen_ai.agent.name` 全量传播）
+- 新增 `invocation-builder.test.ts` 单元测试（含 `gen_ai.agent.name` 覆盖）
+
+---
+
 ## [0.1.3-beta] - 2026-05-07
 
 ### 背景
