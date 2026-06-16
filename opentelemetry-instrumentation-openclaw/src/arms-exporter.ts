@@ -107,7 +107,7 @@ export class ArmsExporter {
 
     // Intentionally NOT calling provider.register() to avoid overriding
     // the global TracerProvider that diagnostics-otel may have registered.
-    this.tracer = this.provider.getTracer("opentelemetry-instrumentation-openclaw", PLUGIN_VERSION);
+    this.tracer = this.provider.getTracer("aliyun.opentelemetry.instrumentation.openclaw", PLUGIN_VERSION);
     this.initialized = true;
     this.api.logger.info(
       `[ArmsTrace] Exporter initialized (service=${this.config.serviceName})`,

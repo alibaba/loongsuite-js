@@ -24,6 +24,7 @@ SERVICE_NAME="openclaw-cms"
 PLUGIN_FILE="${DEFAULT_PLUGIN_FILE}"
 INSTALL_DIR=""
 ENABLE_METRICS=true
+KEEP_CONFIG=false
 
 # ── Color helpers ──
 RED='\033[0;31m'
@@ -51,6 +52,7 @@ Options:
   --plugin-file <path>              local plugin tar.gz path
   --install-dir <path>              install directory override
   --disable-metrics                 skip diagnostics-otel setup
+  --keep-config                     preserve existing plugin config in openclaw.json
   --help                            show this help
 
 Current defaults:
@@ -81,6 +83,7 @@ while [[ $# -gt 0 ]]; do
     --plugin-file)        need_value "$@"; PLUGIN_FILE="$2";   shift 2 ;;
     --install-dir)        need_value "$@"; INSTALL_DIR="$2";   shift 2 ;;
     --disable-metrics)    ENABLE_METRICS=false; shift ;;
+    --keep-config)        KEEP_CONFIG=true; shift ;;
     --help|-h)            usage; exit 0 ;;
     *)
       error "Unknown option: $1"
@@ -91,13 +94,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Validate non-empty config ──
-MISSING=()
-[[ -z "$ENDPOINT" ]]     && MISSING+=("--endpoint")
-
-[[ -z "$SERVICE_NAME" ]] && MISSING+=("--serviceName")
-if [[ ${#MISSING[@]} -gt 0 ]]; then
-  error "Missing required parameters: ${MISSING[*]}"
-  exit 1
+if [[ "$KEEP_CONFIG" != true ]]; then
+  MISSING=()
+  [[ -z "$ENDPOINT" ]]     && MISSING+=("--endpoint")
+  [[ -z "$SERVICE_NAME" ]] && MISSING+=("--serviceName")
+  if [[ ${#MISSING[@]} -gt 0 ]]; then
+    error "Missing required parameters: ${MISSING[*]}"
+    exit 1
+  fi
 fi
 
 if [[ ! -f "$PLUGIN_FILE" ]]; then
@@ -125,6 +129,12 @@ if ! command -v npm &>/dev/null; then
 fi
 ok "npm $(npm --version)"
 
+if ! command -v python3 &>/dev/null; then
+  error "python3 is required but not found. Please install Python 3."
+  exit 1
+fi
+ok "python3 $(python3 --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+
 OPENCLAW_CMD="openclaw"
 if ! command -v "$OPENCLAW_CMD" &>/dev/null; then
   error "OpenClaw CLI not found. Please install OpenClaw first before installing this plugin."
@@ -150,14 +160,18 @@ else
 fi
 
 # ── Check endpoint connectivity ──
-info "Checking endpoint connectivity: ${ENDPOINT}"
-ENDPOINT_HTTP_CODE=$(curl -o /dev/null -s -w "%{http_code}" "$ENDPOINT" -m 10 2>/dev/null || echo "000")
-if [[ "$ENDPOINT_HTTP_CODE" == "000" ]]; then
-  error "Endpoint is unreachable (HTTP code: 000)."
-  error "Please check your network connectivity to: ${ENDPOINT}"
-  exit 1
+if [[ -n "$ENDPOINT" ]]; then
+  info "Checking endpoint connectivity: ${ENDPOINT}"
+  ENDPOINT_HTTP_CODE=$(curl -o /dev/null -s -w "%{http_code}" "$ENDPOINT" -m 10 2>/dev/null || echo "000")
+  if [[ "$ENDPOINT_HTTP_CODE" == "000" ]]; then
+    error "Endpoint is unreachable (HTTP code: 000)."
+    error "Please check your network connectivity to: ${ENDPOINT}"
+    exit 1
+  fi
+  ok "Endpoint reachable (HTTP ${ENDPOINT_HTTP_CODE})"
+elif [[ "$KEEP_CONFIG" == true ]]; then
+  info "Skipping endpoint check (--keep-config: using existing config)"
 fi
-ok "Endpoint reachable (HTTP ${ENDPOINT_HTTP_CODE})"
 
 # ── Determine install directory ──
 if [[ -n "$INSTALL_DIR" ]]; then
@@ -203,11 +217,10 @@ ok "Extracted"
 
 # ── Install npm dependencies ──
 info "Installing npm dependencies (production only)..."
-cd "$TARGET_DIR"
-if ! npm install --omit=dev --ignore-scripts 2>&1; then
+(cd "$TARGET_DIR" && npm install --omit=dev --ignore-scripts 2>&1) || {
   error "npm install failed in ${TARGET_DIR}"
   exit 1
-fi
+}
 ok "Dependencies installed"
 
 # ── Optional diagnostics-otel setup ──
@@ -226,80 +239,94 @@ else
 fi
 info "Updating config: ${CONFIG_PATH}"
 
-node -e "
-const fs = require('fs');
-const configPath = process.argv[1];
-const pluginName = process.argv[2];
-const installDir = process.argv[3];
-const endpoint = process.argv[4];
-const licenseKey = process.argv[5];
-const armsProject = process.argv[6];
-const cmsWorkspace = process.argv[7];
-const serviceName = process.argv[8];
-const enableMetrics = process.argv[9] === 'true';
-const diagPluginName = process.argv[10];
-const needsHooks = process.argv[11] === 'true';
+python3 -c "
+import json, sys, os
 
-let config = {};
-try {
-  config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-} catch (e) {
-  if (e.code !== 'ENOENT') throw e;
-}
+config_path = sys.argv[1]
+plugin_name = sys.argv[2]
+install_dir = sys.argv[3]
+endpoint = sys.argv[4]
+license_key = sys.argv[5]
+arms_project = sys.argv[6]
+cms_workspace = sys.argv[7]
+service_name = sys.argv[8]
+enable_metrics = sys.argv[9] == 'true'
+diag_plugin_name = sys.argv[10]
+needs_hooks = sys.argv[11] == 'true'
+keep_config = sys.argv[12] == 'true'
 
-if (!config.plugins) config.plugins = {};
-if (!Array.isArray(config.plugins.allow)) config.plugins.allow = [];
-if (!config.plugins.allow.includes(pluginName)) config.plugins.allow.push(pluginName);
+config = {}
+if os.path.exists(config_path):
+    with open(config_path) as f:
+        config = json.load(f)
 
-if (!config.plugins.load) config.plugins.load = {};
-if (!Array.isArray(config.plugins.load.paths)) config.plugins.load.paths = [];
-const paths = config.plugins.load.paths;
-const idx = paths.findIndex(p => p.includes(pluginName));
-if (idx >= 0) paths[idx] = installDir;
-else paths.push(installDir);
+config.setdefault('plugins', {})
+plugins = config['plugins']
+plugins.setdefault('allow', [])
+if plugin_name not in plugins['allow']:
+    plugins['allow'].append(plugin_name)
 
-if (!config.plugins.entries) config.plugins.entries = {};
-const pluginHeaders = {};
-if (licenseKey) pluginHeaders['x-arms-license-key'] = licenseKey;
-if (armsProject) pluginHeaders['x-arms-project'] = armsProject;
-if (cmsWorkspace) pluginHeaders['x-cms-workspace'] = cmsWorkspace;
-const entry = {
-  enabled: true,
-  config: {
-    endpoint,
-    headers: pluginHeaders,
-    serviceName,
-    debug: true
-  }
-};
-if (needsHooks) {
-  entry.hooks = { allowConversationAccess: true };
-}
-config.plugins.entries[pluginName] = entry;
+plugins.setdefault('load', {})
+plugins['load'].setdefault('paths', [])
+paths = plugins['load']['paths']
+idx = next((i for i, p in enumerate(paths) if plugin_name in p), -1)
+if idx >= 0:
+    paths[idx] = install_dir
+else:
+    paths.append(install_dir)
 
-if (enableMetrics) {
-  if (!config.plugins.allow.includes(diagPluginName)) config.plugins.allow.push(diagPluginName);
-  if (!config.plugins.entries[diagPluginName]) config.plugins.entries[diagPluginName] = {};
-  config.plugins.entries[diagPluginName].enabled = true;
+plugins.setdefault('entries', {})
+existing = plugins['entries'].get(plugin_name, {})
 
-  if (!config.diagnostics) config.diagnostics = {};
-  config.diagnostics.enabled = true;
-  if (!config.diagnostics.otel) config.diagnostics.otel = {};
-  config.diagnostics.otel.enabled = true;
-  config.diagnostics.otel.endpoint = endpoint;
-  config.diagnostics.otel.protocol = config.diagnostics.otel.protocol || 'http/protobuf';
-  const diagHeaders = {};
-  if (licenseKey) diagHeaders['x-arms-license-key'] = licenseKey;
-  if (armsProject) diagHeaders['x-arms-project'] = armsProject;
-  if (cmsWorkspace) diagHeaders['x-cms-workspace'] = cmsWorkspace;
-  config.diagnostics.otel.headers = diagHeaders;
-  config.diagnostics.otel.serviceName = serviceName;
-  config.diagnostics.otel.metrics = true;
-  if (config.diagnostics.otel.traces === undefined) config.diagnostics.otel.traces = false;
-  if (config.diagnostics.otel.logs === undefined) config.diagnostics.otel.logs = false;
-}
+if keep_config and existing.get('config'):
+    existing['enabled'] = True
+    if needs_hooks:
+        existing['hooks'] = {'allowConversationAccess': True}
+    plugins['entries'][plugin_name] = existing
+else:
+    headers = {}
+    if license_key: headers['x-arms-license-key'] = license_key
+    if arms_project: headers['x-arms-project'] = arms_project
+    if cms_workspace: headers['x-cms-workspace'] = cms_workspace
+    entry = {
+        'enabled': True,
+        'config': {
+            'endpoint': endpoint,
+            'headers': headers,
+            'serviceName': service_name,
+            'debug': True
+        }
+    }
+    if needs_hooks:
+        entry['hooks'] = {'allowConversationAccess': True}
+    plugins['entries'][plugin_name] = entry
 
-fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
+if enable_metrics:
+    if diag_plugin_name not in plugins['allow']:
+        plugins['allow'].append(diag_plugin_name)
+    plugins['entries'].setdefault(diag_plugin_name, {})
+    plugins['entries'][diag_plugin_name]['enabled'] = True
+
+    config.setdefault('diagnostics', {})
+    config['diagnostics']['enabled'] = True
+    config['diagnostics'].setdefault('otel', {})
+    otel = config['diagnostics']['otel']
+    otel['enabled'] = True
+    otel['endpoint'] = endpoint
+    otel.setdefault('protocol', 'http/protobuf')
+    diag_headers = {}
+    if license_key: diag_headers['x-arms-license-key'] = license_key
+    if arms_project: diag_headers['x-arms-project'] = arms_project
+    if cms_workspace: diag_headers['x-cms-workspace'] = cms_workspace
+    otel['headers'] = diag_headers
+    otel['serviceName'] = service_name
+    otel['metrics'] = True
+    otel.setdefault('traces', False)
+    otel.setdefault('logs', False)
+
+with open(config_path, 'w') as f:
+    json.dump(config, f, indent=2)
+    f.write('\n')
 " \
   "$CONFIG_PATH" \
   "$PLUGIN_NAME" \
@@ -311,7 +338,8 @@ fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
   "$SERVICE_NAME" \
   "$ENABLE_METRICS" \
   "$DIAG_PLUGIN_NAME" \
-  "$NEEDS_HOOKS"
+  "$NEEDS_HOOKS" \
+  "$KEEP_CONFIG"
 
 ok "Config updated"
 

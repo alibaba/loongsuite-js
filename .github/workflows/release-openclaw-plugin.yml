@@ -92,6 +92,7 @@ jobs:
           mkdir -p release-assets
           cp "${PLUGIN_DIR}/release/${PLUGIN_NAME}.tar.gz" release-assets/
           cp "${PLUGIN_DIR}/scripts/install.sh" release-assets/
+          cp "${PLUGIN_DIR}/scripts/install-ack.sh" release-assets/
           cp "${PLUGIN_DIR}/scripts/install-wget.sh" release-assets/
           cp "${PLUGIN_DIR}/scripts/uninstall.sh" release-assets/
           (cd release-assets && sha256sum * > SHA256SUMS)
@@ -100,7 +101,8 @@ jobs:
 
           ### Assets
           - ${PLUGIN_NAME}.tar.gz
-          - install.sh
+          - install.sh (interactive install with endpoint/credentials)
+          - install-ack.sh (container image build, env-var driven)
           - install-wget.sh
           - uninstall.sh
           - SHA256SUMS
@@ -172,6 +174,7 @@ jobs:
           gh release create "${TAG}" \
             release-assets/${PLUGIN_NAME}.tar.gz \
             release-assets/install.sh \
+            release-assets/install-ack.sh \
             release-assets/install-wget.sh \
             release-assets/uninstall.sh \
             release-assets/SHA256SUMS \

@@ -12,6 +12,7 @@ import {
   GEN_AI_OUTPUT_MESSAGES,
   GEN_AI_SYSTEM_INSTRUCTIONS,
   GEN_AI_SPAN_KIND,
+  GEN_AI_TOOL_DEFINITIONS,
 } from "@loongsuite/opentelemetry-util-genai";
 
 const MAX_ATTR_LENGTH = 3_200_000;
@@ -69,6 +70,31 @@ export function compatSerializeMessages(
   }
 
   return attrs;
+}
+
+/**
+ * Serialize tool definitions unconditionally (matching this plugin's strategy
+ * of always capturing content). The full definition including `description`
+ * and `parameters` is included for `function`-type tools.
+ *
+ * NOTE: upstream `stopLlm` also writes `gen_ai.tool.definitions` via
+ * `getToolDefinitionsForSpan()`, but that path is gated by experimental mode.
+ * We write into `inv.attributes` which is applied AFTER the upstream call
+ * in `stopLlm` (via `Object.assign(attrs, invocation.attributes)`),
+ * ensuring our unconditional version takes precedence.
+ */
+export function compatSerializeToolDefinitions(
+  inv: LLMInvocation,
+): Record<string, string> {
+  if (!inv.toolDefinitions?.length) return {};
+
+  const dicts = inv.toolDefinitions.map((td) => {
+    if (td.type === "function" && "description" in td) {
+      return { type: td.type, name: td.name, description: td.description, parameters: (td as { parameters?: unknown }).parameters ?? null };
+    }
+    return { type: td.type, name: td.name };
+  });
+  return { [GEN_AI_TOOL_DEFINITIONS]: truncateAttr(JSON.stringify(dicts)) };
 }
 
 /**
