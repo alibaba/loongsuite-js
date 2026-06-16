@@ -136,7 +136,7 @@ echo ""
 # 4. Register hooks in ~/.claude/settings.json + enable built-in telemetry
 msg "==> 正在注册 Claude Code Hook 并启用内置遥测..." \
     "==> Registering Claude Code hooks and enabling built-in telemetry..."
-otel-claude-hook install --user
+node "$PKG_DIR/bin/otel-claude-hook" install --user
 echo ""
 
 # 5. Set up claude alias in shell profiles

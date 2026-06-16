@@ -82,6 +82,7 @@ function loadState(sessionId) {
     start_time: Date.now() / 1000,
     prompt: "",
     model: "unknown",
+    transcript_path: null,
     metrics: {
       input_tokens: 0,
       output_tokens: 0,

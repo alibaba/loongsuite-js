@@ -3,18 +3,46 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## [0.2.0-beta] - 2026-05-08
 
 ### Added
-- Jest test suite: hooks, state, telemetry, intercept parsers, and cli command unit tests
-- `cli.js` and `intercept.js` now included in coverage reporting
+- **Per-turn independent traces**: each conversation turn produces an independent trace (new traceId); all turns share `gen_ai.session.id`
+- **STEP = LLM reasoning cycle**: STEP spans now map to one `llm_call` + resulting tool calls, matching ARMS semantic conventions
+- **Transcript-based tracing**: `transcript.js` parses Claude Code native transcript JSONL for LLM call data, replacing reliance on `intercept.js` HTTP interception; works with all Claude Code versions
+- **Config file support**: `~/.claude/otel-config.json` with priority: config file > env var > default
+- **JSONL log collection**: chain hash incremental validation, daily file rotation, event_t schema (`llm.request`/`llm.response`/`tool.call`/`tool.result`)
+- **Log-only mode**: skip OTel Trace export when only JSONL logging is needed (for ai-agent-collector integration)
+- **Configurable log filename format**: `"default"` (`claude-code.jsonl.YYYYMMDD`) or `"hook"` (`claude-code-YYYY-MM-DD.jsonl`)
+- **Multimodal image support**: `BlobPart` (base64) and `UriPart` (URL) across Anthropic, OpenAI Chat, and OpenAI Responses protocols
+- **Message converter module**: Anthropic/OpenAI/Responses protocol conversion to ARMS semantic format
+- **`--no-alias` install option**: skip shell alias setup for managed installations (pilot)
+- **Cursor IDE compatibility**: `matcher` field on hook entries; auto-skip when called by Cursor
+- **Hook wrapper script**: `hook-entry.sh` with built-in Node discovery (nvm, homebrew, volta, fnm fallbacks), eliminating PATH dependency
+- Jest test suite: hooks, state, telemetry, intercept parsers, cli commands, transcript, message-converter
 
 ### Fixed
-- `process.ppid` ≠ claude PID bug: `resolveClaudePid()` now walks the process tree
-  (`/proc` on Linux, `ps` on macOS) to correctly locate `proxy_events_<pid>.jsonl`
+- **O(N²) OOM in transcript parsing**: store `input_messages` as delta instead of cumulative copies (35MB transcript: memory from >4GB to ~98MB)
+- **`-p` mode missing LLM/STEP spans**: remove `setImmediate` race in `intercept.js`
+- **`OTEL_RESOURCE_ATTRIBUTES` not fully parsed** into OTel Resource
+- **`input.messages_delta` was cumulative**: now computes true incremental delta via slice-based diff
+- **Orphaned `pre_tool_use` events**: produce TOOL spans with `tool.orphaned=true` instead of silently dropping
+- **Duplicate trace generation**: events cleared after successful export in `cmdStop()`
+- `process.ppid` ≠ claude PID bug: `resolveClaudePid()` walks the process tree
 - `readProxyEvents` with unknown PID no longer deletes files (safe fallback)
 - `tool_use_id` fallback aligned between `cmdPreToolUse` and `cmdPostToolUse` (both use `null`)
-- `detectLang()` no longer spawns subprocesses (`defaults read`, PowerShell); uses env vars only
+- `detectLang()` no longer spawns subprocesses; uses env vars only
+- `setup-alias.sh`: add file writability check, handle `cat >>` failure gracefully
+- `uninstall.sh`: add `npm uninstall -g` step for global package cleanup
+- `package-lock.json` regenerated to resolve from npm registry (fix `link: true` issue)
+- Remove `agent.name` from event logs, keep `agent.type` as `"claude-code"`
+- Test isolation: mock `otel-config.json` reads to prevent local config interference
+
+### Changed
+- **Alias env var cleanup**: GenAI SDK env vars (Group A) moved from alias to `bin/otel-claude-hook` entry point; `NODE_OPTIONS` + `intercept.js` removed from alias
+- `setup-alias.sh`: add `--minimal` mode (cleanup only, no alias write) for pilot installations
+- Auto-upgrade legacy alias blocks containing `intercept.js` references
+- `gen_ai.session.id` set on ALL spans (ENTRY, AGENT, STEP, LLM, TOOL), not just ENTRY
+- JSONL log fields migrated from `gen_ai.*` to event_t dotted namespace
 
 ### Performance
 - Hook subprocess startup latency reduced by removing synchronous OS calls in `detectLang()`

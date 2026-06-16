@@ -991,19 +991,17 @@ function tryInstallUndici() {
       };
 
       wrappedHandler.onResponseEnd = (controller, trailers) => {
-        setImmediate(() => {
-          try {
-            const rawBody = Buffer.concat(responseChunks);
-            appendProxyEvent(buildEvent(requestStartTime, reqFields, responseStatus, rawBody, contentType, contentEncoding, vendorTraceId, protocol));
-          } catch (err) {
-            debug("error processing response: " + err.message);
-          }
-        });
+        try {
+          const rawBody = Buffer.concat(responseChunks);
+          appendProxyEvent(buildEvent(requestStartTime, reqFields, responseStatus, rawBody, contentType, contentEncoding, vendorTraceId, protocol));
+        } catch (err) {
+          debug("error processing response: " + err.message);
+        }
         return handler.onResponseEnd?.(controller, trailers);
       };
 
       wrappedHandler.onResponseError = (controller, err) => {
-        setImmediate(() => appendProxyEvent(buildErrorEvent(requestStartTime, reqFields, err)));
+        try { appendProxyEvent(buildErrorEvent(requestStartTime, reqFields, err)); } catch {}
         return handler.onResponseError?.(controller, err);
       };
 
@@ -1065,39 +1063,37 @@ function installHttpsPatch() {
         });
 
         res.on("end", () => {
-          setImmediate(() => {
-            try {
-              const reqBody = Buffer.concat(reqBodyChunks).toString("utf-8");
-              const rawResBody = Buffer.concat(resBodyChunks);
+          try {
+            const reqBody = Buffer.concat(reqBodyChunks).toString("utf-8");
+            const rawResBody = Buffer.concat(resBodyChunks);
 
-              let reqFields = { messages: null, model: "", system: null, request_body: null };
-              try { reqFields = extractRequestFields(reqBody, protocol); } catch {}
+            let reqFields = { messages: null, model: "", system: null, request_body: null };
+            try { reqFields = extractRequestFields(reqBody, protocol); } catch {}
 
-              if (protocol === "anthropic" && isInternalCall(reqFields)) {
-                debug("https.request: skipping internal call");
-                return;
-              }
-
-              const contentType = res.headers["content-type"] || "";
-              const contentEncoding = (res.headers["content-encoding"] || "").trim().toLowerCase();
-              const statusCode = res.statusCode || 200;
-
-              const event = buildEvent(
-                requestStartTime,
-                reqFields,
-                statusCode,
-                rawResBody,
-                contentType,
-                contentEncoding,
-                res.headers["eagleeye-traceid"] || "",
-                protocol
-              );
-              appendProxyEvent(event);
-              debug(`https.request intercepted → ${event.model} in=${event.input_tokens} out=${event.output_tokens}`);
-            } catch (err) {
-              debug("https.request parse error: " + err.message);
+            if (protocol === "anthropic" && isInternalCall(reqFields)) {
+              debug("https.request: skipping internal call");
+              return;
             }
-          });
+
+            const contentType = res.headers["content-type"] || "";
+            const contentEncoding = (res.headers["content-encoding"] || "").trim().toLowerCase();
+            const statusCode = res.statusCode || 200;
+
+            const event = buildEvent(
+              requestStartTime,
+              reqFields,
+              statusCode,
+              rawResBody,
+              contentType,
+              contentEncoding,
+              res.headers["eagleeye-traceid"] || "",
+              protocol
+            );
+            appendProxyEvent(event);
+            debug(`https.request intercepted → ${event.model} in=${event.input_tokens} out=${event.output_tokens}`);
+          } catch (err) {
+            debug("https.request parse error: " + err.message);
+          }
         });
 
         if (callback) callback(res);

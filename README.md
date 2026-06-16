@@ -41,7 +41,7 @@ Both plugins follow the [OpenTelemetry GenAI semantic conventions](https://opent
 **One-line install (with OTLP backend):**
 
 ```bash
-curl -fsSL https://arms-apm-cn-hangzhou-pre.oss-cn-hangzhou.aliyuncs.com/agenttrack/remote-install.sh | bash -s -- \
+curl -fsSL https://arms-apm-cn-hangzhou-pre.oss-cn-hangzhou.aliyuncs.com/opentelemetry-instrumentation-claude/remote-install.sh | bash -s -- \
   --endpoint "https://your-otlp-endpoint:4318" \
   --service-name "my-claude-agent"
 ```

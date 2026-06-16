@@ -25,7 +25,7 @@ set -euo pipefail
 # ============================================================
 # Defaults
 # ============================================================
-DEFAULT_TARBALL_URL="https://arms-apm-cn-hangzhou-pre.oss-cn-hangzhou.aliyuncs.com/agenttrack/otel-claude-hook.tar.gz"
+DEFAULT_TARBALL_URL="https://arms-apm-cn-hangzhou-pre.oss-cn-hangzhou.aliyuncs.com/opentelemetry-instrumentation-claude/otel-claude-hook.tar.gz"
 TARBALL_URL="${OTEL_CLAUDE_TARBALL_URL:-$DEFAULT_TARBALL_URL}"
 PLUGIN_NAME="otel-claude-hook"
 
@@ -239,6 +239,8 @@ if [ -n "$ENDPOINT" ]; then
             sed '/# BEGIN otel-claude-hook-env/,/# END otel-claude-hook-env/d' "$file" > "$tmp_clean"
             mv "$tmp_clean" "$file"
         fi
+        # Ensure file ends with a newline before appending
+        [ -s "$file" ] && [ "$(tail -c1 "$file" | wc -l)" -eq 0 ] && echo "" >> "$file"
         cat >> "$file" << ENVBLOCK
 
 # BEGIN otel-claude-hook-env

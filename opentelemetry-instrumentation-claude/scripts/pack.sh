@@ -8,11 +8,11 @@
 #
 # 上传到 OSS（需要 ak/sk，让有权限的人执行）：
 #   ossutil cp dist/otel-claude-hook.tar.gz \
-#     oss://arms-apm-cn-hangzhou-pre/agenttrack/otel-claude-hook.tar.gz \
+#     oss://arms-apm-cn-hangzhou-pre/opentelemetry-instrumentation-claude/otel-claude-hook.tar.gz \
 #     --acl public-read
 #
 # 上传后验证：
-#   curl -fsSL https://arms-apm-cn-hangzhou-pre.oss-cn-hangzhou.aliyuncs.com/agenttrack/otel-claude-hook.tar.gz -o /dev/null -w "%{http_code}\n"
+#   curl -fsSL https://arms-apm-cn-hangzhou-pre.oss-cn-hangzhou.aliyuncs.com/opentelemetry-instrumentation-claude/otel-claude-hook.tar.gz -o /dev/null -w "%{http_code}\n"
 
 set -euo pipefail
 
@@ -58,16 +58,16 @@ echo "下一步 — 上传到 OSS（需要有 OSS 写权限的账号执行）：
 echo ""
 echo "  # 方式 1：ossutil（推荐）"
 echo "  ossutil cp $OUTPUT \\"
-echo "    oss://arms-apm-cn-hangzhou-pre/agenttrack/${PLUGIN_NAME}.tar.gz \\"
+echo "    oss://arms-apm-cn-hangzhou-pre/opentelemetry-instrumentation-claude/${PLUGIN_NAME}.tar.gz \\"
 echo "    --acl public-read"
 echo ""
 echo "  # 方式 2：aliyun CLI"
 echo "  aliyun oss cp $OUTPUT \\"
-echo "    oss://arms-apm-cn-hangzhou-pre/agenttrack/${PLUGIN_NAME}.tar.gz \\"
+echo "    oss://arms-apm-cn-hangzhou-pre/opentelemetry-instrumentation-claude/${PLUGIN_NAME}.tar.gz \\"
 echo "    --acl public-read"
 echo ""
 echo "上传后验证（HTTP 200 = 成功）："
-echo "  curl -o /dev/null -sI https://arms-apm-cn-hangzhou-pre.oss-cn-hangzhou.aliyuncs.com/agenttrack/${PLUGIN_NAME}.tar.gz | head -1"
+echo "  curl -o /dev/null -sI https://arms-apm-cn-hangzhou-pre.oss-cn-hangzhou.aliyuncs.com/opentelemetry-instrumentation-claude/${PLUGIN_NAME}.tar.gz | head -1"
 echo ""
 echo "更新后一行安装命令："
-echo "  curl -fsSL https://arms-apm-cn-hangzhou-pre.oss-cn-hangzhou.aliyuncs.com/agenttrack/remote-install.sh | bash"
+echo "  curl -fsSL https://arms-apm-cn-hangzhou-pre.oss-cn-hangzhou.aliyuncs.com/opentelemetry-instrumentation-claude/remote-install.sh | bash"

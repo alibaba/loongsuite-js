@@ -2,16 +2,23 @@
 # setup-alias.sh — Add the claude alias to shell profiles.
 # Called by install.sh. Can also be run standalone.
 #
-# The alias ensures every `claude` invocation automatically loads intercept.js
-# for LLM call tracing without requiring NODE_OPTIONS to be set manually.
+# LLM trace data is obtained from Claude Code's transcript files via hooks.
+# NODE_OPTIONS / intercept.js is no longer needed.
 
 set -euo pipefail
 
-INTERCEPT_PATH="$HOME/.cache/opentelemetry.instrumentation.claude/intercept.js"
+MINIMAL=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --minimal) MINIMAL=1; shift ;;
+        *) shift ;;
+    esac
+done
+
 # If claude_identity is set at invocation time, it takes priority over OTEL_SERVICE_NAME.
 # The alias uses a shell substitution so the check happens each time claude is run,
 # not at install time — no code changes required.
-ALIAS_LINE="alias claude='CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=otlp OTEL_METRIC_EXPORT_INTERVAL=20000 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta OTEL_SERVICE_NAME=\"\${claude_identity:-\${OTEL_SERVICE_NAME:-}}\" NODE_OPTIONS=\"--require $INTERCEPT_PATH\" npx -y @anthropic-ai/claude-code@2.1.112'"
+ALIAS_LINE="alias claude='CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=otlp OTEL_METRIC_EXPORT_INTERVAL=20000 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta OTEL_SERVICE_NAME=\"\${claude_identity:-\${OTEL_SERVICE_NAME:-}}\" npx -y @anthropic-ai/claude-code@latest'"
 
 # ---------------------------------------------------------------------------
 # 语言检测 / Language detection
@@ -60,26 +67,61 @@ msg() {
 
 ADDED=0
 
+upgrade_old_alias() {
+    local file="$1"
+    if [ ! -f "$file" ] || [ ! -w "$file" ]; then return; fi
+    if grep -q "# BEGIN otel-claude-hook" "$file" 2>/dev/null && \
+       grep -q "intercept\.js" "$file" 2>/dev/null; then
+        # Old alias contains intercept.js — remove the block so it gets re-created
+        sed -i.otel-bak '/# BEGIN otel-claude-hook/,/# END otel-claude-hook/d' "$file"
+        rm -f "${file}.otel-bak"
+        msg "  ↳ 已清理旧版 alias（含 intercept.js）于 $file" \
+            "  ↳ Cleaned up legacy alias (with intercept.js) in $file"
+    fi
+}
+
 add_alias_to_file() {
     local file="$1"
     if [ ! -f "$file" ]; then
         return
     fi
+    if [ ! -w "$file" ]; then
+        msg "  ↳ $file 不可写，跳过" \
+            "  ↳ $file is not writable, skipping"
+        return
+    fi
+    # Upgrade: remove old alias block that contains intercept.js
+    upgrade_old_alias "$file"
     if grep -q "# BEGIN otel-claude-hook" "$file" 2>/dev/null; then
         msg "  ↳ 已存在于 $file" \
             "  ↳ Already present in $file"
         return
     fi
-    cat >> "$file" << ALIAS_BLOCK
-
+    # Ensure file ends with a newline before appending
+    [ -s "$file" ] && [ "$(tail -c1 "$file" | wc -l)" -eq 0 ] && echo "" >> "$file"
+    if cat >> "$file" << ALIAS_BLOCK
 # BEGIN otel-claude-hook
 $ALIAS_LINE
 # END otel-claude-hook
 ALIAS_BLOCK
-    msg "  ✅ 已添加别名到 $file" \
-        "  ✅ Added alias to $file"
-    ADDED=1
+    then
+        msg "  ✅ 已添加别名到 $file" \
+            "  ✅ Added alias to $file"
+        ADDED=1
+    else
+        msg "  ↳ 写入 $file 失败，跳过" \
+            "  ↳ Failed to write $file, skipping"
+    fi
 }
+
+if [ "$MINIMAL" -eq 1 ]; then
+    upgrade_old_alias "$HOME/.bashrc"
+    upgrade_old_alias "$HOME/.zshrc"
+    upgrade_old_alias "$HOME/.bash_profile"
+    msg "已清理旧版别名（minimal 模式，不写入新别名）" \
+        "Legacy alias cleaned up (minimal mode, no new alias written)"
+    exit 0
+fi
 
 msg "==> 正在设置 claude 别名..." \
     "==> Setting up claude alias in shell profiles..."

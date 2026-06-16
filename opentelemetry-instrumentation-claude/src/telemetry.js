@@ -22,6 +22,7 @@ const { BatchSpanProcessor, ConsoleSpanExporter } = require("@opentelemetry/sdk-
 const { OTLPTraceExporter } = require("@opentelemetry/exporter-trace-otlp-http");
 const { Resource } = require("@opentelemetry/resources");
 const { trace } = require("@opentelemetry/api");
+const config = require("./config");
 
 // 1 MB attribute length limit (aligned with Python version)
 const MAX_ATTRIBUTE_LENGTH = 1 * 1024 * 1024;
@@ -34,17 +35,45 @@ let _tracerProvider = null;
  * @returns {string}
  */
 function resolveServiceName(defaultName = "claude-agents") {
-  const envName = (process.env.OTEL_SERVICE_NAME || "").trim();
-  if (envName) return envName;
+  const cfgName = config.getServiceName("").trim();
+  if (cfgName) return cfgName;
 
-  for (const attr of (process.env.OTEL_RESOURCE_ATTRIBUTES || "").split(",")) {
-    const trimmed = attr.trim();
-    if (trimmed.startsWith("service.name=")) {
-      return trimmed.slice("service.name=".length).trim();
-    }
-  }
+  const attrs = parseResourceAttributes();
+  if (attrs["service.name"]) return attrs["service.name"];
 
   return defaultName;
+}
+
+/**
+ * Parse all key=value pairs from OTEL_RESOURCE_ATTRIBUTES.
+ * @returns {Record<string, string>}
+ */
+function parseResourceAttributes() {
+  const attrs = {};
+  const raw = config.getResourceAttributes();
+  if (!raw) return attrs;
+  for (const pair of raw.split(",")) {
+    const idx = pair.indexOf("=");
+    if (idx === -1) continue;
+    const key = pair.slice(0, idx).trim();
+    const val = pair.slice(idx + 1).trim();
+    if (key) attrs[key] = val;
+  }
+  return attrs;
+}
+
+/**
+ * Build the full Resource attributes object.
+ * Priority: OTEL_SERVICE_NAME > OTEL_RESOURCE_ATTRIBUTES service.name > default
+ * All other OTEL_RESOURCE_ATTRIBUTES are included as-is.
+ * @param {string} serviceName
+ * @returns {Record<string, string>}
+ */
+function buildResourceAttrs(serviceName) {
+  const envAttrs = parseResourceAttributes();
+  envAttrs["service.name"] = resolveServiceName(serviceName);
+  envAttrs["gen_ai.agent.system"] = "claude";
+  return envAttrs;
 }
 
 /**
@@ -53,7 +82,7 @@ function resolveServiceName(defaultName = "claude-agents") {
  */
 function parseOtlpHeaders() {
   const headers = {};
-  const raw = process.env.OTEL_EXPORTER_OTLP_HEADERS || "";
+  const raw = config.getHeaders();
   if (!raw) return headers;
   for (const pair of raw.split(",")) {
     const idx = pair.indexOf("=");
@@ -72,7 +101,7 @@ function parseOtlpHeaders() {
  * @returns {NodeTracerProvider}
  */
 function configureOtlp(endpoint, serviceName) {
-  const resource = new Resource({ "service.name": resolveServiceName(serviceName) });
+  const resource = new Resource(buildResourceAttrs(serviceName));
   const otlpEndpoint = endpoint.endsWith("/v1/traces")
     ? endpoint
     : endpoint.replace(/\/$/, "") + "/v1/traces";
@@ -103,7 +132,7 @@ function configureOtlp(endpoint, serviceName) {
  * @returns {NodeTracerProvider}
  */
 function configureConsole(serviceName) {
-  const resource = new Resource({ "service.name": resolveServiceName(serviceName) });
+  const resource = new Resource(buildResourceAttrs(serviceName));
   const provider = new NodeTracerProvider({
     resource,
     spanLimits: { attributeValueLengthLimit: MAX_ATTRIBUTE_LENGTH },
@@ -127,7 +156,7 @@ function configureConsole(serviceName) {
 function configureTelemetry(serviceName = "claude-agents") {
   if (_tracerProvider) return _tracerProvider;
 
-  const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  const endpoint = config.getEndpoint();
   if (endpoint) {
     try {
       const provider = configureOtlp(endpoint, serviceName);
@@ -138,7 +167,7 @@ function configureTelemetry(serviceName = "claude-agents") {
     }
   }
 
-  if (process.env.CLAUDE_TELEMETRY_DEBUG) {
+  if (config.isDebug()) {
     console.error("🔍 Debug mode: telemetry output to console");
     return configureConsole(serviceName);
   }
@@ -149,7 +178,9 @@ function configureTelemetry(serviceName = "claude-agents") {
     "1. Any OTEL backend:\n" +
     "   export OTEL_EXPORTER_OTLP_ENDPOINT=\"https://api.honeycomb.io\"\n" +
     "   export OTEL_EXPORTER_OTLP_HEADERS=\"x-honeycomb-team=your_key\"\n\n" +
-    "2. Debug mode (console output only):\n" +
+    "2. Config file (~/.claude/otel-config.json):\n" +
+    "   { \"otlp_endpoint\": \"https://api.honeycomb.io\" }\n\n" +
+    "3. Debug mode (console output only):\n" +
     "   export CLAUDE_TELEMETRY_DEBUG=1\n"
   );
 }
@@ -168,4 +199,4 @@ async function shutdownTelemetry() {
   }
 }
 
-module.exports = { configureTelemetry, shutdownTelemetry, resolveServiceName };
+module.exports = { configureTelemetry, shutdownTelemetry, resolveServiceName, parseResourceAttributes, buildResourceAttrs };

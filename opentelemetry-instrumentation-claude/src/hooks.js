@@ -239,11 +239,56 @@ function addResponseToEventData(eventData, toolResponse) {
   }
 }
 
+/**
+ * Extract a clean result value from Claude Code's tool response for `toolCallResult`.
+ * @param {*} toolResponse
+ * @returns {string|object|null}
+ */
+function extractToolResult(toolResponse) {
+  if (toolResponse == null) return null;
+  if (typeof toolResponse === "string") return toolResponse;
+  if (typeof toolResponse !== "object" || Array.isArray(toolResponse)) return toolResponse;
+
+  if (toolResponse.error || toolResponse.isError) {
+    return `Error: ${toolResponse.error || "Unknown error"}`;
+  }
+
+  for (const key of ["result", "content", "message", "output", "stdout"]) {
+    if (!(key in toolResponse)) continue;
+    const raw = toolResponse[key];
+    if (Array.isArray(raw)) {
+      const texts = raw
+        .filter(item => item && typeof item === "object" && item.type === "text" && item.text)
+        .map(item => item.text);
+      if (texts.length > 0) return texts.join("");
+    }
+    return raw;
+  }
+
+  return toolResponse;
+}
+
+/**
+ * Detect if a tool response indicates an error.
+ * @param {*} toolResponse
+ * @returns {{ message: string, type: string } | null}
+ */
+function extractToolError(toolResponse) {
+  if (!toolResponse || typeof toolResponse !== "object" || Array.isArray(toolResponse)) return null;
+  if (!toolResponse.error && !toolResponse.isError) return null;
+  return {
+    message: String(toolResponse.error || "Unknown error"),
+    type: "ToolError",
+  };
+}
+
 module.exports = {
   createToolTitle,
   createEventData,
   addResponseToEventData,
   truncateForDisplay,
   smartTruncateValue,
+  extractToolResult,
+  extractToolError,
   MAX_CONTENT_LENGTH,
 };

@@ -4,6 +4,14 @@
 
 "use strict";
 
+// Ensure GenAI SDK defaults — must run before any SDK module is loaded
+if (!process.env.OTEL_SEMCONV_STABILITY_OPT_IN) {
+  process.env.OTEL_SEMCONV_STABILITY_OPT_IN = "gen_ai_latest_experimental";
+}
+if (!process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT) {
+  process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "SPAN_ONLY";
+}
+
 /**
  * otel-claude-hook — CLI entry point.
  *
@@ -98,6 +106,8 @@ program
   .option("--no-user", "Skip user-level settings")
   .option("--project", "Install into project-level settings (.claude/settings.json)")
   .option("--quiet", "Silent mode: warn on error instead of exiting (for postinstall use)")
+  .option("--no-alias", "Skip shell alias setup (for managed installations like pilot)")
+  .option("--settings-path <path>", "Explicit path to settings.json (overrides --user/--project)")
   .action(async (opts) => {
     try {
       await cmdInstall(opts);
