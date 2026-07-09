@@ -67,7 +67,7 @@ import {
 } from "./semconv/gen-ai-extended-attributes.js";
 import { VERSION } from "./version.js";
 
-const INSTRUMENTATION_NAME = "@loongsuite/opentelemetry-util-genai";
+const INSTRUMENTATION_NAME = "@loongsuite/otel-util-genai";
 
 type AnyExtendedInvocation = {
   contextToken?: Context | null;

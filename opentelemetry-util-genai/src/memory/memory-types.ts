@@ -36,6 +36,10 @@ export interface MemoryInvocation {
   serverAddress?: string | null;
   serverPort?: number | null;
   monotonicStartS?: number | null;
+  // ARMS GenAI common attributes (apply to all spans). All optional.
+  // userId already declared above; only agentName/sessionId are new.
+  agentName?: string | null;
+  sessionId?: string | null;
 }
 
 export function createMemoryInvocation(

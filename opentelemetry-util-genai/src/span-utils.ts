@@ -53,6 +53,9 @@ import {
   GEN_AI_OUTPUT_MESSAGES,
   GEN_AI_SYSTEM_INSTRUCTIONS,
   GEN_AI_TOOL_DEFINITIONS,
+  GEN_AI_AGENT_NAME,
+  GEN_AI_USER_ID,
+  GEN_AI_SESSION_ID,
   SERVER_ADDRESS,
   SERVER_PORT,
   ERROR_TYPE,
@@ -173,9 +176,16 @@ export function getLlmResponseAttributes(
       invocation.usageCacheReadInputTokens;
   }
 
-  let totalTokens = 0;
-  if (invocation.inputTokens != null) totalTokens += invocation.inputTokens;
-  if (invocation.outputTokens != null) totalTokens += invocation.outputTokens;
+  // Prefer the upstream-reported total; only compute (input + output) when the
+  // upstream did not provide a usable total.
+  let totalTokens: number;
+  if (invocation.totalTokens != null && invocation.totalTokens > 0) {
+    totalTokens = invocation.totalTokens;
+  } else {
+    totalTokens = 0;
+    if (invocation.inputTokens != null) totalTokens += invocation.inputTokens;
+    if (invocation.outputTokens != null) totalTokens += invocation.outputTokens;
+  }
   if (totalTokens > 0) {
     attrs[GEN_AI_USAGE_TOTAL_TOKENS] = totalTokens;
   }
@@ -335,6 +345,54 @@ export function maybeEmitLlmEvent(
   });
 }
 
+/**
+ * Apply ARMS GenAI common attributes (gen_ai.agent.name / gen_ai.user.id /
+ * gen_ai.session.id) into a flat attribute bag.
+ *
+ * These three keys are required as common attributes per ARMS GenAI semantic
+ * conventions — every span (ENTRY/AGENT/STEP/LLM/TOOL/...) should carry them
+ * when the values are available.
+ */
+export function applyCommonGenAiAttributes(
+  attrs: Record<string, unknown>,
+  invocation: {
+    agentName?: string | null;
+    userId?: string | null;
+    sessionId?: string | null;
+  },
+): void {
+  if (invocation.agentName != null) {
+    attrs[GEN_AI_AGENT_NAME] = invocation.agentName;
+  }
+  if (invocation.userId != null) {
+    attrs[GEN_AI_USER_ID] = invocation.userId;
+  }
+  if (invocation.sessionId != null) {
+    attrs[GEN_AI_SESSION_ID] = invocation.sessionId;
+  }
+}
+
+/**
+ * Apply pass-through attributes with fill-only semantics: a key is written to
+ * the attribute bag ONLY if it is not already present. This guarantees that
+ * converter-produced attributes (usage totals, model, common attributes,
+ * invocation.attributes overrides like TTFT, ...) are never clobbered by
+ * user-supplied pass-through fields. Intended to be called last, after all
+ * managed attributes have been written.
+ */
+export function applyPassthroughAttributes(
+  attrs: Record<string, unknown>,
+  passthrough?: Record<string, unknown> | null,
+): void {
+  if (!passthrough) return;
+  for (const key of Object.keys(passthrough)) {
+    const value = passthrough[key];
+    if (value != null && !(key in attrs)) {
+      attrs[key] = value;
+    }
+  }
+}
+
 export function applyLlmFinishAttributes(
   span: Span,
   invocation: LLMInvocation,
@@ -357,9 +415,11 @@ export function applyLlmFinishAttributes(
     attrs,
     getToolDefinitionsForSpan(invocation.toolDefinitions),
   );
+  applyCommonGenAiAttributes(attrs, invocation);
   if (invocation.attributes) {
     Object.assign(attrs, invocation.attributes);
   }
+  applyPassthroughAttributes(attrs, invocation.passthroughAttributes);
 
   span.setAttributes(attrs as Record<string, string | number | boolean>);
 }

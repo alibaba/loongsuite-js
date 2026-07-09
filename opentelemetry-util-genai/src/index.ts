@@ -99,6 +99,8 @@ export { ExtendedInvocationMetricsRecorder } from "./extended-metrics.js";
 
 // Span Utils
 export {
+  applyCommonGenAiAttributes,
+  applyPassthroughAttributes,
   getLlmCommonAttributes,
   getLlmSpanName,
   getLlmRequestAttributes,
@@ -137,3 +139,6 @@ export * from "./semconv/gen-ai-memory-attributes.js";
 // Environment Variables
 export * from "./environment-variables.js";
 export * from "./extended-environment-variables.js";
+
+// Event Log → Trace conversion
+export * from "./event-log/index.js";

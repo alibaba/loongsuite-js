@@ -1,0 +1,58 @@
+[
+  {
+    "time_unix_nano": 1779667200000000000,
+    "event.id": "d-r1",
+    "event.name": "llm.request",
+    "user.id": "emp_004",
+    "trace_id": "deadbeefcafebabe0123456789abcdef",
+    "gen_ai.session.id": "sess_delta",
+    "gen_ai.turn.id": "turn_D",
+    "gen_ai.step.id": "step_1",
+    "gen_ai.provider.name": "openai",
+    "gen_ai.request.model": "gpt-5",
+    "gen_ai.input.messages_delta": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"Hi\"}]}]"
+  },
+  {
+    "time_unix_nano": 1779667200100000000,
+    "event.id": "d-s1",
+    "event.name": "llm.response",
+    "user.id": "emp_004",
+    "trace_id": "deadbeefcafebabe0123456789abcdef",
+    "gen_ai.session.id": "sess_delta",
+    "gen_ai.turn.id": "turn_D",
+    "gen_ai.step.id": "step_1",
+    "gen_ai.provider.name": "openai",
+    "gen_ai.request.model": "gpt-5",
+    "gen_ai.response.finish_reasons": ["tool_calls"],
+    "gen_ai.usage.input_tokens": 5,
+    "gen_ai.usage.output_tokens": 5
+  },
+  {
+    "time_unix_nano": 1779667200200000000,
+    "event.id": "d-r2",
+    "event.name": "llm.request",
+    "user.id": "emp_004",
+    "trace_id": "deadbeefcafebabe0123456789abcdef",
+    "gen_ai.session.id": "sess_delta",
+    "gen_ai.turn.id": "turn_D",
+    "gen_ai.step.id": "step_2",
+    "gen_ai.provider.name": "openai",
+    "gen_ai.request.model": "gpt-5",
+    "gen_ai.input.messages_delta": "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"tool_call\",\"id\":\"c1\",\"name\":\"ls\",\"arguments\":{}}]},{\"role\":\"tool\",\"parts\":[{\"type\":\"tool_call_response\",\"id\":\"c1\",\"response\":\"file.txt\"}]}]"
+  },
+  {
+    "time_unix_nano": 1779667200300000000,
+    "event.id": "d-s2",
+    "event.name": "llm.response",
+    "user.id": "emp_004",
+    "trace_id": "deadbeefcafebabe0123456789abcdef",
+    "gen_ai.session.id": "sess_delta",
+    "gen_ai.turn.id": "turn_D",
+    "gen_ai.step.id": "step_2",
+    "gen_ai.provider.name": "openai",
+    "gen_ai.request.model": "gpt-5",
+    "gen_ai.response.finish_reasons": ["stop"],
+    "gen_ai.usage.input_tokens": 12,
+    "gen_ai.usage.output_tokens": 8
+  }
+]

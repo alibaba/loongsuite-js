@@ -1,4 +1,4 @@
-# @loongsuite/opentelemetry-util-genai
+# @loongsuite/otel-util-genai
 
 OpenTelemetry GenAI utility library for Node.js — standardized telemetry collection for Generative AI operations including LLM, Agent, Embedding, Tool, Retrieval, Rerank, Memory, Entry, and ReAct Step.
 
@@ -7,7 +7,7 @@ This is the Node.js equivalent of the Python `opentelemetry-util-genai` package,
 ## Installation
 
 ```bash
-npm install @loongsuite/opentelemetry-util-genai
+npm install @loongsuite/otel-util-genai
 ```
 
 ## Features
@@ -30,7 +30,7 @@ npm install @loongsuite/opentelemetry-util-genai
 import {
   TelemetryHandler,
   createLLMInvocation,
-} from "@loongsuite/opentelemetry-util-genai";
+} from "@loongsuite/otel-util-genai";
 
 const handler = new TelemetryHandler();
 
@@ -82,7 +82,7 @@ import {
   createRetrievalInvocation,
   createInvokeAgentInvocation,
   createMemoryInvocation,
-} from "@loongsuite/opentelemetry-util-genai";
+} from "@loongsuite/otel-util-genai";
 
 const handler = new ExtendedTelemetryHandler();
 
@@ -180,6 +180,111 @@ This library follows the [OpenTelemetry GenAI Semantic Conventions](https://open
 
 - `getTelemetryHandler(options?)` — Get or create the default `TelemetryHandler`
 - `getExtendedTelemetryHandler(options?)` — Get or create the default `ExtendedTelemetryHandler`
+
+## Event Log → Trace conversion
+
+The package can convert a flat list of records that follow the
+[loongsuite-pilot AI event schema](https://github.com/alibaba/loongsuite-pilot)
+into an OTel span tree (`ENTRY → AGENT → STEP → LLM/TOOL`) that satisfies the
+ARMS GenAI semantic conventions. This lets agent plugins keep emitting only
+event logs and delegate trace shape to this SDK.
+
+```ts
+import { readFileSync } from "node:fs";
+import {
+  BasicTracerProvider,
+  BatchSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import {
+  ExtendedTelemetryHandler,
+  convertEventLogToTrace,
+} from "@loongsuite/otel-util-genai";
+
+const provider = new BasicTracerProvider({
+  spanProcessors: [new BatchSpanProcessor(new OTLPTraceExporter())],
+});
+const handler = new ExtendedTelemetryHandler({ tracerProvider: provider });
+
+const records = JSON.parse(readFileSync("turn-events.json", "utf-8"));
+const { traceIds, spanCount, warnings } = convertEventLogToTrace(records, {
+  handler,
+  strict: false,
+});
+await provider.forceFlush();
+
+console.log(`Exported ${spanCount} spans across ${traceIds.length} traces`);
+if (warnings.length) console.warn(warnings);
+```
+
+### Helper: returning `ReadableSpan[]` directly
+
+If you don't already own a TracerProvider — for example you're building a
+downstream pilot/exporter that needs the span data as values to feed into
+your own `OTLPTraceExporter` — use the helper:
+
+```ts
+import { convertEventLogToReadableSpans } from "@loongsuite/otel-util-genai";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
+
+const exporter = new OTLPTraceExporter({ url, headers });
+const { spans, traceIds, warnings } = await convertEventLogToReadableSpans(records);
+exporter.export(spans, (result) => {
+  if (result.code !== 0) console.error("export failed", result.error);
+});
+```
+
+The helper internally spins up a private `BasicTracerProvider` +
+`InMemorySpanExporter`, runs the conversion, captures finished spans, and
+tears the provider down. It is never registered globally, so it cannot
+pollute the host process's OTel context. Requires
+`@opentelemetry/sdk-trace-base` at runtime (declared as an optional peer
+dep — install it in the consumer package).
+
+### Behavior summary
+
+- Records are grouped by `gen_ai.turn.id` (one OTel trace per turn) then by
+  `gen_ai.step.id` (one STEP span per step).
+- Each `llm.request` + `llm.response` pair becomes one LLM span; each
+  `tool.call` + `tool.result` pair becomes one TOOL span.
+- `trace_id` on the records is honored — generated spans inherit it via a
+  synthetic parent context. If `trace_id` is missing the SDK allocates one.
+- `gen_ai.input.messages_delta` is accumulated across the whole turn to
+  reconstruct full `gen_ai.input.messages` for each LLM span.
+- `gen_ai.usage.total_tokens` prefers the upstream-reported value; it falls
+  back to `input + output` only when the upstream did not provide a usable
+  total (missing, or `0` while input/output are non-zero).
+- `strict: true` throws `EventLogConversionError` on the first issue;
+  otherwise non-fatal problems are returned in `warnings`.
+
+### Passing custom event fields through to spans
+
+`passthroughKeys` is an allowlist of event-log field names to copy verbatim
+onto the generated spans (the field name is used as the span attribute name —
+no renaming). Both `convertEventLogToTrace` and
+`convertEventLogToReadableSpans` accept it.
+
+```ts
+convertEventLogToTrace(records, {
+  handler,
+  passthroughKeys: [
+    "deployment.env",             // turn-level tag → broadcast to every span
+    "gen_ai.request.temperature", // per-record → each LLM span gets its own value
+  ],
+});
+```
+
+- **Turn-level**: a field resolved once per turn is written to every span of
+  that turn (ENTRY/AGENT/STEP/LLM/TOOL).
+- **Per-record**: LLM and TOOL spans additionally read the field off their own
+  source records, overriding the turn-level value on collision.
+- **Fill-only**: a pass-through field is only written when the span does not
+  already carry that attribute, so converter-managed attributes (token usage,
+  model, common attributes, ...) are never overwritten. To override those,
+  build the invocation directly and use `invocation.attributes` instead.
+- Prefer listing small scalar fields (env / id / temperature / custom tags);
+  avoid large payload fields such as `gen_ai.input.messages`.
+- Omit `passthroughKeys` to keep behavior unchanged.
 
 ## License
 

@@ -1,4 +1,4 @@
-# @loongsuite/opentelemetry-util-genai
+# @loongsuite/otel-util-genai
 
 面向 Node.js 的 OpenTelemetry GenAI 工具库 — 为生成式 AI 操作提供标准化的遥测数据采集，涵盖 LLM、Agent、Embedding、Tool、Retrieval、Rerank、Memory、Entry 和 ReAct Step。
 
@@ -7,7 +7,7 @@
 ## 安装
 
 ```bash
-npm install @loongsuite/opentelemetry-util-genai
+npm install @loongsuite/otel-util-genai
 ```
 
 ## 功能特性
@@ -30,7 +30,7 @@ npm install @loongsuite/opentelemetry-util-genai
 import {
   TelemetryHandler,
   createLLMInvocation,
-} from "@loongsuite/opentelemetry-util-genai";
+} from "@loongsuite/otel-util-genai";
 
 const handler = new TelemetryHandler();
 
@@ -82,7 +82,7 @@ import {
   createRetrievalInvocation,
   createInvokeAgentInvocation,
   createMemoryInvocation,
-} from "@loongsuite/opentelemetry-util-genai";
+} from "@loongsuite/otel-util-genai";
 
 const handler = new ExtendedTelemetryHandler();
 
@@ -180,6 +180,103 @@ handler.memory(createMemoryInvocation("search", { userId: "user-1" }), (inv) => 
 
 - `getTelemetryHandler(options?)` — 获取或创建默认的 `TelemetryHandler`
 - `getExtendedTelemetryHandler(options?)` — 获取或创建默认的 `ExtendedTelemetryHandler`
+
+## Event Log → Trace 转换
+
+本包提供将 [loongsuite-pilot AI 事件日志规范](https://github.com/alibaba/loongsuite-pilot)
+格式的事件流转换为符合 ARMS GenAI 语义规范的 OTel span 树
+（`ENTRY → AGENT → STEP → LLM/TOOL`）的能力。Agent 插件可以只输出 event log，
+trace 结构的构造交给本 SDK 完成。
+
+```ts
+import { readFileSync } from "node:fs";
+import {
+  BasicTracerProvider,
+  BatchSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import {
+  ExtendedTelemetryHandler,
+  convertEventLogToTrace,
+} from "@loongsuite/otel-util-genai";
+
+const provider = new BasicTracerProvider({
+  spanProcessors: [new BatchSpanProcessor(new OTLPTraceExporter())],
+});
+const handler = new ExtendedTelemetryHandler({ tracerProvider: provider });
+
+const records = JSON.parse(readFileSync("turn-events.json", "utf-8"));
+const { traceIds, spanCount, warnings } = convertEventLogToTrace(records, {
+  handler,
+  strict: false,
+});
+await provider.forceFlush();
+
+console.log(`已导出 ${spanCount} 个 span，覆盖 ${traceIds.length} 个 trace`);
+if (warnings.length) console.warn(warnings);
+```
+
+### 辅助函数：直接获取 `ReadableSpan[]`
+
+如果你**没有**现成的 TracerProvider——例如你在做 pilot / 下游 exporter，
+需要拿到 span **数据**喂给自己的 `OTLPTraceExporter`——用辅助函数：
+
+```ts
+import { convertEventLogToReadableSpans } from "@loongsuite/otel-util-genai";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
+
+const exporter = new OTLPTraceExporter({ url, headers });
+const { spans, traceIds, warnings } = await convertEventLogToReadableSpans(records);
+exporter.export(spans, (result) => {
+  if (result.code !== 0) console.error("export failed", result.error);
+});
+```
+
+辅助函数内部一次性创建私有 `BasicTracerProvider` + `InMemorySpanExporter`，
+运行转换、抓取 finished spans 后销毁 provider。**绝不**注册到全局，不会污
+染宿主进程的 OTel context。运行时需要 `@opentelemetry/sdk-trace-base`
+（声明为可选 peer dep——由消费方安装）。
+
+### 行为要点
+
+- 按 `gen_ai.turn.id` 分组（每个 turn 一个独立 OTel trace），再按
+  `gen_ai.step.id` 分组（每个 step 一个 STEP span）。
+- 同一 step 内 `llm.request` + `llm.response` 配对成 1 个 LLM span；
+  `tool.call` + `tool.result` 配对成 1 个 TOOL span。
+- 事件日志中的 `trace_id` 会被消费——生成的 span 通过虚拟父 context 继承同
+  一个 trace_id。若缺失则由 SDK 自动分配。
+- `gen_ai.input.messages_delta` 会在整个 turn 内累积，重建出每个 LLM span
+  完整的 `gen_ai.input.messages`。
+- `gen_ai.usage.total_tokens` 优先采用上游报告值；仅当上游未提供（缺失，或值为
+  0 而 input/output 非零等不可用情况）时，才回退计算 `input + output`。
+- `strict: true` 在首个错误处抛出 `EventLogConversionError`；否则非致命问题
+  以 `warnings` 数组返回。
+
+### 把自定义 event 字段透传到 span
+
+`passthroughKeys` 是一个白名单,把 event log 里的字段原样(字段名即 span 属性
+名,不改名)拷贝到生成的 span 上。`convertEventLogToTrace` 和
+`convertEventLogToReadableSpans` 都支持。
+
+```ts
+convertEventLogToTrace(records, {
+  handler,
+  passthroughKeys: [
+    "deployment.env",             // turn 级标签 → 广播到所有 span
+    "gen_ai.request.temperature", // per-record → 每个 LLM span 取各自的值
+  ],
+});
+```
+
+- **turn 级**:整个 turn 只解析一次的字段,写到该 turn 的每个 span
+  (ENTRY/AGENT/STEP/LLM/TOOL)。
+- **per-record**:LLM / TOOL span 额外从自身源 record 读取,同名时覆盖 turn 级值。
+- **fill-only(只补空位)**:透传仅在 span 尚未携带该属性时才写入,绝不覆盖
+  转换器已产出的属性(token 聚合、model、common 属性等)。若确实要覆盖这些,
+  请直接构建 invocation 并使用 `invocation.attributes`。
+- 建议只放小的标量字段(env / id / temperature / 自定义 tag),避免透传
+  `gen_ai.input.messages` 这类大字段。
+- 不传 `passthroughKeys` 时行为完全不变。
 
 ## 许可证
 

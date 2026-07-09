@@ -1,0 +1,28 @@
+[
+  {
+    "time_unix_nano": 1779667200000000000,
+    "event.id": "orphan-req",
+    "event.name": "llm.request",
+    "user.id": "emp_005",
+    "trace_id": "fedcba9876543210fedcba9876543210",
+    "gen_ai.session.id": "sess_eps",
+    "gen_ai.turn.id": "turn_E",
+    "gen_ai.step.id": "step_1",
+    "gen_ai.provider.name": "openai",
+    "gen_ai.request.model": "gpt-5",
+    "gen_ai.input.messages_delta": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"Hi\"}]}]"
+  },
+  {
+    "time_unix_nano": 1779667200500000000,
+    "event.id": "orphan-result",
+    "event.name": "tool.result",
+    "user.id": "emp_005",
+    "trace_id": "fedcba9876543210fedcba9876543210",
+    "gen_ai.session.id": "sess_eps",
+    "gen_ai.turn.id": "turn_E",
+    "gen_ai.step.id": "step_1",
+    "gen_ai.tool.name": "bash",
+    "gen_ai.tool.call.id": "lone-call",
+    "gen_ai.tool.call.result": { "stdout": "ok" }
+  }
+]

@@ -36,7 +36,7 @@ import type { LLMInvocation, GenAIError } from "./types.js";
 import { createLLMInvocation } from "./types.js";
 import { VERSION } from "./version.js";
 
-const INSTRUMENTATION_NAME = "@loongsuite/opentelemetry-util-genai";
+const INSTRUMENTATION_NAME = "@loongsuite/otel-util-genai";
 
 export interface TelemetryHandlerOptions {
   tracerProvider?: TracerProvider;
