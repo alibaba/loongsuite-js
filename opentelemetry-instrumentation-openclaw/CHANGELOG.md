@@ -2,6 +2,32 @@
 
 本文档记录 `opentelemetry-instrumentation-openclaw` 的重要变更。
 
+## [0.1.5-beta] - 2026-07-14
+
+### 新增
+
+- **自定义 SpanProcessor 注入（`spanProcessorModule`）**：
+  - 新增配置项 `spanProcessorModule`（或环境变量 `ARMS_SPAN_PROCESSOR_MODULE`），指向一个默认导出 `SpanProcessor` 的 JS/MJS 模块；绝对路径原样使用，相对路径相对 `OPENCLAW_HOME`（`~/.openclaw`）解析
+  - 用于注入依赖 span 类型/内容的动态属性（如按 model 判定成本档位、按工具名判定工具类别），或将 span 转发到额外后端；补足 `globalSpanAttributes` 仅支持静态值的空缺
+  - 通过包子路径导出 helper：`@loongsuite/opentelemetry-instrumentation-openclaw/span-processor` 提供 `defineGenAiSpanProcessor`，按 GenAI span 类型分派（`onLlmEnding`/`onToolEnding`/`onAgentEnding`/`onStepEnding`/`onEntryEnding`），并屏蔽语义规范方言差异
+  - 加载失败/校验不通过时优雅降级到内置 processor；用户回调全程 try/catch 隔离，绝不影响内置导出管道
+- **`openclaw.trace.close_reason` 诊断属性**：ENTRY span 上标注 trace 关闭方式（`normal` / `runid_recovered` / `stale_sweeper`），便于在 ARMS 中定位异常关闭的调用链
+
+### 修复
+
+- **修复跨天巨长 ENTRY/AGENT span（时长被拉到 1d+）**：
+  - 根因：`agent_end` 仅按 channel 归属 context，当其解析到的 channel 与 `llm_input` 注册的 channel 不一致时，找不到本轮 context、关不掉已开的 ENTRY/AGENT span；这些泄漏的 span 在内存中滞留，直到之后某次 `agent_end` 或会话 reset 时以 `Date.now()` 被误关，产生天级时长
+  - 主修：`agent_end` 在 channel 解析不到可关闭 span 时，用 openclaw 附带的 `runId` 兜回本轮 context（channel 优先、runId 补充，不改动常见路径）
+  - 加固：过期上下文清扫器（sweeper）对仍开放的 ENTRY/AGENT/STEP span 主动强制关闭，使用**有界的最后活动时间**而非 `Date.now()`，并彻底清理所有查找结构
+- **修复工具 span 因 channel 错配被静默丢弃**：`before_tool_call` 在 `agent/` 通道无锚点时，用 `runId` 兜回 context 恢复工具 span（并对 `runId==sessionId` 且上下文正在关闭的场景加守卫，避免挂到上一轮 trace）
+
+### 说明
+
+- 新增单元测试：`span-processor.test.ts`（类型分派/方言容错/优雅降级/运行时隔离）、`channel-mismatch-repro.test.ts`（工具 span channel 错配恢复）、`agent-end-stale-close.test.ts`（`agent_end` runId 兜回 + sweeper 有界强关）
+- `spanProcessorModule` 会加载并执行本地任意代码，仅指向可信模块
+
+---
+
 ## [0.1.4-beta] - 2026-05-26
 
 ### 新增

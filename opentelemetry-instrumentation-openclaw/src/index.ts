@@ -459,6 +459,13 @@ const armsTracePlugin: OpenClawPlugin = {
         ? { ...envSpanAttrs, ...configSpanAttrs }
         : undefined;
 
+    // Custom SpanProcessor module: config > env. Relative paths are resolved
+    // against OPENCLAW_HOME by the loader.
+    const finalSpanProcessorModule =
+      (resolvedConfig.spanProcessorModule as string) ||
+      process.env.ARMS_SPAN_PROCESSOR_MODULE ||
+      undefined;
+
     const config: ArmsTraceConfig = {
       endpoint: finalEndpoint,
       headers,
@@ -471,6 +478,7 @@ const armsTracePlugin: OpenClawPlugin = {
       propagationTargetUrls: resolvedConfig.propagationTargetUrls as string[] | undefined,
       resourceAttributes: finalResourceAttributes,
       globalSpanAttributes: finalGlobalSpanAttributes,
+      spanProcessorModule: finalSpanProcessorModule,
     };
 
     const exporter = new ArmsExporter(api, config);
@@ -510,12 +518,64 @@ const armsTracePlugin: OpenClawPlugin = {
     let lastUserContextSetAt: number | undefined;
     const openclawVersion: string = api.runtime?.version || "unknown";
 
+    // Every context this plugin still tracks, across all lookup structures.
+    // The primary maps can drop a context while its open spans and Set/anchor
+    // entries linger, so the sweeper unions all of them to find leaks.
+    const collectTrackedContexts = (): Set<TraceContext> => {
+      const all = new Set<TraceContext>();
+      for (const ctx of contextByChannelId.values()) all.add(ctx);
+      for (const ctx of contextByRunId.values()) all.add(ctx);
+      for (const set of contextsByChannelId.values()) {
+        for (const ctx of set) all.add(ctx);
+      }
+      for (const ctx of activeContextByAgentChannel.values()) all.add(ctx);
+      return all;
+    };
+
+    // Force-close a context's still-open ENTRY/AGENT/STEP spans using a bounded
+    // last-activity time (never Date.now()), so a context whose agent_end was
+    // missed gets a realistic duration instead of one that grows until it is
+    // finally noticed. Returns whether any span was closed.
+    const forceCloseLeakedContext = (ctx: TraceContext): boolean => {
+      const boundedEnd =
+        ctx.lastLlmEndTime ||
+        ctx.stepStartTime ||
+        ctx.agentStartTime ||
+        ctx.rootSpanStartTime ||
+        ctx.createdAt;
+      const leakAttrs: Record<string, string | number | boolean> = {
+        "openclaw.trace.close_reason": "stale_sweeper",
+      };
+      let closed = false;
+      if (ctx.stepSpanId && exporter.getOpenSpan(ctx.stepSpanId)) {
+        exporter.endSpanById(ctx.stepSpanId, boundedEnd, leakAttrs);
+        closed = true;
+      }
+      if (ctx.agentSpanId && exporter.getOpenSpan(ctx.agentSpanId)) {
+        exporter.endSpanById(ctx.agentSpanId, boundedEnd, leakAttrs);
+        closed = true;
+      }
+      if (ctx.rootSpanStartTime && exporter.getOpenSpan(ctx.rootSpanId)) {
+        exporter.endSpanById(ctx.rootSpanId, boundedEnd, leakAttrs);
+        closed = true;
+      }
+      if (closed && config.debug) {
+        api.logger.warn(
+          `[ArmsTrace] Force-closed leaked spans (stale sweeper): traceId=${ctx.traceId}, runId=${ctx.runId}, boundedEnd=${boundedEnd}`,
+        );
+      }
+      return closed;
+    };
+
     const sweepStaleContexts = () => {
       const now = Date.now();
-      for (const [key, ctx] of contextByChannelId) {
+      let closedAny = false;
+      for (const ctx of collectTrackedContexts()) {
         if (now - ctx.createdAt > CONTEXT_MAX_AGE_MS) {
-          contextByChannelId.delete(key);
-          contextByRunId.delete(ctx.runId);
+          if (forceCloseLeakedContext(ctx)) {
+            closedAny = true;
+          }
+          cleanupContextIdentity(ctx);
         }
       }
       for (const [key, pending] of pendingToolCalls) {
@@ -532,6 +592,9 @@ const armsTracePlugin: OpenClawPlugin = {
             );
           }
         }
+      }
+      if (closedAny) {
+        void exporter.flush().catch(() => {});
       }
     };
     const contextSweepTimer = setInterval(sweepStaleContexts, CONTEXT_SWEEP_INTERVAL_MS);
@@ -1796,21 +1859,53 @@ const armsTracePlugin: OpenClawPlugin = {
             rawChannelId.startsWith("agent/")
               ? activeContextByAgentChannel.get(rawChannelId)
               : undefined;
+          // Context recovered via the runId fallback below. Reused verbatim by
+          // the resolution step so the object we validated here is exactly the
+          // object the tool span attaches to (re-resolving via getOrCreateContext
+          // could return a different context and defeat the isClosing guard).
+          let fallbackResolvedCtx: TraceContext | undefined;
           if (rawChannelId.startsWith("agent/") && !anchoredCtx) {
+            const fallbackRunId = resolveOptionalRunId(event.runId) || resolveOptionalRunId(hookCtx.runId as string);
+            const fallbackCtx = fallbackRunId
+              ? getContextByRun(fallbackRunId)
+              : undefined;
+            // openclaw derives runId as `opts.runId || sessionId`, so when it
+            // falls back to sessionId the value is stable across turns rather
+            // than a unique per-turn id. In that case a context found by runId
+            // may belong to a previous/closing turn, so reject a closing ctx to
+            // avoid attaching this tool span to the wrong turn's trace.
+            const sessionId = resolveOptionalRunId(hookCtx.sessionId as string);
+            const runIdIsSessionFallback = Boolean(
+              fallbackRunId && sessionId && fallbackRunId === sessionId,
+            );
+            if (
+              !fallbackCtx
+              || !fallbackCtx.hasSeenLlmInput
+              || (runIdIsSessionFallback && fallbackCtx.isClosing)
+            ) {
+              if (config.debug) {
+                api.logger.warn(
+                  `[ArmsTrace] Skip tool span without active agent context: tool=${event.toolName}, channelId=${rawChannelId}, runId=${fallbackRunId || "-"}`,
+                );
+              }
+              return;
+            }
+            fallbackResolvedCtx = fallbackCtx;
             if (config.debug) {
-              api.logger.warn(
-                `[ArmsTrace] Skip tool span without active agent context: tool=${event.toolName}, channelId=${rawChannelId}`,
+              api.logger.info(
+                `[ArmsTrace] Resolved tool context via runId fallback: tool=${event.toolName}, channelId=${rawChannelId}, runId=${fallbackRunId}`,
               );
             }
-            return;
           }
           const { ctx, channelId } = anchoredCtx
             ? { ctx: anchoredCtx, channelId: anchoredCtx.channelId }
-            : getOrCreateContext(
-              rawChannelId,
-              resolveOptionalRunId(event.runId),
-              "before_tool_call",
-            );
+            : fallbackResolvedCtx
+              ? { ctx: fallbackResolvedCtx, channelId: fallbackResolvedCtx.channelId }
+              : getOrCreateContext(
+                rawChannelId,
+                resolveOptionalRunId(event.runId) || resolveOptionalRunId(hookCtx.runId as string),
+                "before_tool_call",
+              );
           if (!ctx.hasSeenLlmInput) {
             if (config.debug) {
               api.logger.warn(
@@ -2035,11 +2130,40 @@ const armsTracePlugin: OpenClawPlugin = {
         "agent_end",
         async (event: AgentEndEvent, hookCtx: PluginHookContext) => {
           const rawChannelId = resolveChannelId(hookCtx);
-          const { ctx, channelId } = getOrCreateContext(
+          const channelResolved = getOrCreateContext(
             rawChannelId,
             undefined,
             "agent_end",
           );
+          let ctx = channelResolved.ctx;
+          let channelId = channelResolved.channelId;
+          let closeReason: "normal" | "runid_recovered" = "normal";
+          // Supplement (not override) channel resolution: only when the channel
+          // path yields a context with no closable ENTRY/AGENT span — the case
+          // that otherwise leaks this turn's spans until a later agent_end
+          // mis-closes them with a huge duration — recover the real context by
+          // the runId openclaw attaches to agent_end.
+          const channelHasClosableSpan = Boolean(ctx.rootSpanStartTime || ctx.agentSpanId);
+          if (!channelHasClosableSpan) {
+            const agentEndRunId =
+              resolveOptionalRunId(event.runId) || resolveOptionalRunId(hookCtx.runId as string);
+            const runCtx = agentEndRunId ? getContextByRun(agentEndRunId) : undefined;
+            if (runCtx && (runCtx.rootSpanStartTime || runCtx.agentSpanId)) {
+              // Drop the empty context the channel path just created so it does
+              // not linger as a stray agent-channel anchor for later hooks.
+              if (channelResolved.isNew) {
+                cleanupContextIdentity(channelResolved.ctx);
+              }
+              ctx = runCtx;
+              channelId = runCtx.channelId;
+              closeReason = "runid_recovered";
+              if (config.debug) {
+                api.logger.info(
+                  `[ArmsTrace] agent_end recovered context via runId: runId=${agentEndRunId}, channelId=${channelId}, traceId=${ctx.traceId}`,
+                );
+              }
+            }
+          }
           await drainTraceTasks(ctx.traceId);
 
           // If a final LLM segment is still in-flight (waiting for
@@ -2155,6 +2279,7 @@ const armsTracePlugin: OpenClawPlugin = {
               if (rootSpanStartTime) {
                 const rootEndAttrs: Record<string, string | number | boolean> = {
                   "request.duration_ms": entryEndTime - rootSpanStartTime,
+                  "openclaw.trace.close_reason": closeReason,
                 };
                 if (resolvedSessionId) {
                   rootEndAttrs["openclaw.session.id"] = resolvedSessionId;

@@ -1,7 +1,7 @@
 {
   "id": "opentelemetry-instrumentation-openclaw",
   "name": "OpenClaw OTel Plugin",
-  "version": "0.1.4-beta",
+  "version": "0.1.5-beta",
   "description": "Report OpenClaw AI agent execution traces to any OTLP-compatible backend via OpenTelemetry",
   "type": "plugin",
   "entry": "./dist/index.js",
@@ -60,6 +60,10 @@
         "type": "array",
         "items": { "type": "string" },
         "description": "URL substrings for outbound traceparent injection (e.g. [\"api.openai.com\"]). Injects into all HTTPS calls except the OTLP endpoint if omitted."
+      },
+      "spanProcessorModule": {
+        "type": "string",
+        "description": "Path to a JS/MJS module whose default export is a custom SpanProcessor. Absolute paths are used as-is; relative paths resolve against ~/.openclaw. Falls back to ARMS_SPAN_PROCESSOR_MODULE env var. Load failures degrade gracefully to the built-in processor."
       }
     }
   }

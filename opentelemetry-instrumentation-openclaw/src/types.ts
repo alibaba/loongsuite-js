@@ -55,6 +55,13 @@ export interface ArmsTraceConfig {
   propagationTargetUrls?: string[];
   resourceAttributes?: Record<string, string>;
   globalSpanAttributes?: Record<string, string | number | boolean>;
+  /**
+   * Path to a user module exporting a custom SpanProcessor as its default
+   * export. Absolute paths are used as-is; relative paths are resolved against
+   * OPENCLAW_HOME (~/.openclaw). Load/validation failures degrade gracefully to
+   * the built-in processor only. See span-processor-loader.ts.
+   */
+  spanProcessorModule?: string;
 }
 
 export type SpanType =
@@ -197,4 +204,9 @@ export interface AgentEndEvent {
   success: boolean;
   error?: string;
   durationMs?: number;
+  /**
+   * Run id openclaw attaches to the agent_end event (via withAgentRunId). Used
+   * to recover this run's context when channel-based resolution misses it.
+   */
+  runId?: string;
 }

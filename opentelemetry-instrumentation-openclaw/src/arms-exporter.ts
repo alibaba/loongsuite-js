@@ -11,12 +11,14 @@ import {
 import {
   BasicTracerProvider,
   BatchSpanProcessor,
+  type SpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import { hostname } from "node:os";
 import { basename } from "node:path";
+import { loadUserSpanProcessor } from "./span-processor-loader.js";
 import type {
   ArmsTraceConfig,
   OpenClawPluginApi,
@@ -100,9 +102,22 @@ export class ArmsExporter {
       scheduledDelayMillis: this.config.flushIntervalMs,
     });
 
+    // The built-in processor stays first so the export pipeline keeps working
+    // even if a user-provided processor fails to load or throws at runtime.
+    const spanProcessors: SpanProcessor[] = [spanProcessor];
+    if (this.config.spanProcessorModule) {
+      const userProcessor = await loadUserSpanProcessor(
+        this.config.spanProcessorModule,
+        this.api,
+      );
+      if (userProcessor) {
+        spanProcessors.push(userProcessor);
+      }
+    }
+
     this.provider = new BasicTracerProvider({
       resource,
-      spanProcessors: [spanProcessor],
+      spanProcessors,
     });
 
     // Intentionally NOT calling provider.register() to avoid overriding
