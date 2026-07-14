@@ -594,7 +594,13 @@ const armsTracePlugin: OpenClawPlugin = {
         }
       }
       if (closedAny) {
-        void exporter.flush().catch(() => {});
+        void exporter.flush().catch((err) => {
+          if (config.debug) {
+            api.logger.warn(
+              `[ArmsTrace] Stale-sweeper flush failed: ${String(err)}`,
+            );
+          }
+        });
       }
     };
     const contextSweepTimer = setInterval(sweepStaleContexts, CONTEXT_SWEEP_INTERVAL_MS);
