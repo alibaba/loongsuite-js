@@ -102,6 +102,7 @@ When a config field is not set in `openclaw.json`, the plugin falls back to envi
 | `ARMS_ENABLE_TRACE_PROPAGATION` | `enableTracePropagation` | Enable W3C Trace Context propagation (`true` / `1`) |
 | `OTEL_RESOURCE_ATTRIBUTES` | `resourceAttributes` | Custom resource attributes (`key1=value1,key2=value2`) |
 | `OTEL_SPAN_ATTRIBUTES` | `globalSpanAttributes` | Global span attributes injected to all spans (`key1=value1,key2=value2`) |
+| `ARMS_SPAN_PROCESSOR_MODULE` | `spanProcessorModule` | Path to a module whose default export is a custom SpanProcessor |
 
 Priority: **config file > environment variable > default value**
 
@@ -193,6 +194,87 @@ export OTEL_SPAN_ATTRIBUTES="biz.team=payment,biz.app=checkout"
 3. Built-in `openclaw.*` / `gen_ai.*` attributes — always preserved
 
 For `resourceAttributes`, config file values override environment variable values for the same key.
+
+---
+
+## Custom SpanProcessor (Dynamic Attributes)
+
+`globalSpanAttributes` only supports **static** values. When you need attributes
+that depend on span type or content (e.g. cost tier by model, tool class by tool
+name), or you want to forward spans to an extra backend, inject a custom
+`SpanProcessor`.
+
+Point the plugin at a module whose **default export** is a `SpanProcessor`:
+
+```json
+{
+  "config": {
+    "endpoint": "https://your-otlp-endpoint:4318",
+    "spanProcessorModule": "./biz-span-processor.mjs"
+  }
+}
+```
+
+- Absolute paths are used as-is; relative paths resolve against `~/.openclaw`.
+- Env fallback: `ARMS_SPAN_PROCESSOR_MODULE`.
+- If the module fails to load or is invalid, the plugin logs an error and keeps
+  working with the built-in processor only (graceful degradation).
+
+### Recommended: the helper API
+
+The package exports a helper that dispatches by GenAI span type and hides both
+the OTel SDK details and the semantic-convention dialect. Write
+`~/.openclaw/biz-span-processor.mjs`:
+
+```js
+import { defineGenAiSpanProcessor } from
+  "@loongsuite/opentelemetry-instrumentation-openclaw/span-processor";
+
+export default defineGenAiSpanProcessor({
+  onLlmEnding(span, { model }) {
+    span.setAttribute("business.cost_tier",
+      model?.includes("gpt-4") ? "premium" : "standard");
+  },
+  onToolEnding(span, { toolName }) {
+    span.setAttribute("business.tool_class",
+      toolName?.startsWith("mcp_") ? "mcp" : "native");
+  },
+  // also available: onAgentEnding / onStepEnding / onEntryEnding
+});
+```
+
+Each hook fires at **`onEnding`**, where the span is still writable and all
+attributes are populated.
+
+### Advanced: a raw SpanProcessor
+
+For full lifecycle control (e.g. forwarding to another backend), export a
+standard `SpanProcessor`:
+
+```js
+export default {
+  onStart(span, parentContext) {},
+  onEnding(span) { span.setAttribute("business.env", process.env.BIZ_ENV ?? "prod"); },
+  onEnd(readableSpan) { /* read-only: observe / forward */ },
+  forceFlush() { return Promise.resolve(); },
+  shutdown() { return Promise.resolve(); },
+};
+```
+
+### Hook points
+
+| Hook | Span writable | Attributes available | Use for |
+|---|---|---|---|
+| `onStart(span)` | Yes | Start-time attributes (incl. `gen_ai.span.kind`); end-time attributes not yet set | Static / env attributes |
+| `onEnding(span)` | Yes | **All attributes** | **Recommended**: dynamic, type-based injection |
+| `onEnd(readableSpan)` | No (read-only) | All attributes | Observation, logging, forwarding |
+
+> Writing attributes in `onEnd` via `readableSpan.attributes[...] = ...` is an
+> unsupported hack that bypasses SDK/plugin truncation and validation. Always
+> write in `onEnding`.
+
+> **Security**: `spanProcessorModule` loads and executes arbitrary local code.
+> Only point it at modules you trust.
 
 ---
 
