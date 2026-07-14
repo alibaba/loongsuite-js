@@ -42,6 +42,10 @@ export interface EmbeddingInvocation {
   serverAddress?: string | null;
   serverPort?: number | null;
   monotonicStartS?: number | null;
+  // ARMS GenAI common attributes (apply to all spans). All optional.
+  agentName?: string | null;
+  userId?: string | null;
+  sessionId?: string | null;
 }
 
 export function createEmbeddingInvocation(
@@ -63,6 +67,11 @@ export interface ExecuteToolInvocation {
   toolCallArguments?: unknown;
   toolCallResult?: unknown;
   monotonicStartS?: number | null;
+  // ARMS GenAI common attributes (apply to all spans). All optional.
+  agentName?: string | null;
+  userId?: string | null;
+  sessionId?: string | null;
+  passthroughAttributes?: Record<string, unknown>;
 }
 
 export function createExecuteToolInvocation(
@@ -84,6 +93,10 @@ export interface CreateAgentInvocation {
   serverAddress?: string | null;
   serverPort?: number | null;
   monotonicStartS?: number | null;
+  // ARMS GenAI common attributes (apply to all spans). All optional.
+  // agentName already declared above; only userId/sessionId are new.
+  userId?: string | null;
+  sessionId?: string | null;
 }
 
 export function createCreateAgentInvocation(
@@ -113,6 +126,9 @@ export interface InvokeAgentInvocation {
   finishReasons?: string[] | null;
   inputTokens?: number | null;
   outputTokens?: number | null;
+  // Upstream-reported total tokens. When set, it is written verbatim; otherwise
+  // total is computed as inputTokens + outputTokens.
+  totalTokens?: number | null;
   usageCacheCreationInputTokens?: number | null;
   usageCacheReadInputTokens?: number | null;
   outputType?: string | null;
@@ -129,6 +145,11 @@ export interface InvokeAgentInvocation {
   monotonicStartS?: number | null;
   monotonicEndS?: number | null;
   monotonicFirstTokenS?: number | null;
+  // ARMS GenAI common attributes (apply to all spans). All optional.
+  // agentName already declared above; only userId/sessionId are new.
+  userId?: string | null;
+  sessionId?: string | null;
+  passthroughAttributes?: Record<string, unknown>;
 }
 
 export function createInvokeAgentInvocation(
@@ -159,6 +180,10 @@ export interface RetrievalInvocation {
   serverAddress?: string | null;
   serverPort?: number | null;
   monotonicStartS?: number | null;
+  // ARMS GenAI common attributes (apply to all spans). All optional.
+  agentName?: string | null;
+  userId?: string | null;
+  sessionId?: string | null;
 }
 
 export function createRetrievalInvocation(
@@ -187,6 +212,10 @@ export interface RerankInvocation {
   inputDocuments?: unknown;
   outputDocuments?: unknown;
   monotonicStartS?: number | null;
+  // ARMS GenAI common attributes (apply to all spans). All optional.
+  agentName?: string | null;
+  userId?: string | null;
+  sessionId?: string | null;
 }
 
 export function createRerankInvocation(
@@ -206,6 +235,10 @@ export interface EntryInvocation {
   outputMessages?: OutputMessage[];
   responseTimeToFirstToken?: number | null;
   monotonicStartS?: number | null;
+  // ARMS GenAI common attributes (apply to all spans). All optional.
+  // sessionId/userId already declared above; only agentName is new.
+  agentName?: string | null;
+  passthroughAttributes?: Record<string, unknown>;
 }
 
 export function createEntryInvocation(
@@ -221,6 +254,11 @@ export interface ReactStepInvocation {
   finishReason?: string | null;
   round?: number | null;
   monotonicStartS?: number | null;
+  // ARMS GenAI common attributes (apply to all spans). All optional.
+  agentName?: string | null;
+  userId?: string | null;
+  sessionId?: string | null;
+  passthroughAttributes?: Record<string, unknown>;
 }
 
 export function createReactStepInvocation(

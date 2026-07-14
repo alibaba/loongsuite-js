@@ -136,11 +136,21 @@ export interface LLMInvocation extends GenAIInvocation {
   systemInstruction?: MessagePart[];
   toolDefinitions?: ToolDefinition[];
   provider?: string | null;
+  // ARMS GenAI common attributes (apply to all spans). All optional.
+  agentName?: string | null;
+  userId?: string | null;
+  sessionId?: string | null;
+  // Pass-through attributes written with fill-only semantics (never override
+  // managed attributes). Optional.
+  passthroughAttributes?: Record<string, unknown>;
   responseModelName?: string | null;
   responseId?: string | null;
   finishReasons?: string[] | null;
   inputTokens?: number | null;
   outputTokens?: number | null;
+  // Upstream-reported total tokens. When set, it is written verbatim; otherwise
+  // total is computed as inputTokens + outputTokens.
+  totalTokens?: number | null;
   metricAttributes?: Record<string, unknown>;
   temperature?: number | null;
   topP?: number | null;

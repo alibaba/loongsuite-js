@@ -1,6 +1,6 @@
 {
-  "name": "@loongsuite/opentelemetry-util-genai",
-  "version": "0.1.0",
+  "name": "@loongsuite/otel-util-genai",
+  "version": "0.1.0-beta.9",
   "description": "OpenTelemetry GenAI utility for standardized telemetry collection across LLM, Agent, Embedding, Tool, Retrieval, Rerank, Memory and more",
   "type": "module",
   "license": "Apache-2.0",
@@ -12,6 +12,9 @@
   "homepage": "https://github.com/alibaba/loongsuite-js/tree/main/opentelemetry-util-genai#readme",
   "bugs": {
     "url": "https://github.com/alibaba/loongsuite-js/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": [
     "opentelemetry",
@@ -50,10 +53,17 @@
     "@opentelemetry/semantic-conventions": "^1.40.0"
   },
   "peerDependencies": {
-    "@opentelemetry/api": "^1.9.0"
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-trace-base": "^1.30.0"
+  },
+  "peerDependenciesMeta": {
+    "@opentelemetry/sdk-trace-base": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-trace-base": "^1.30.0",
     "@types/node": "^20.0.0",
     "@vitest/coverage-v8": "^4.1.3",
     "typescript": "^5.0.0",

@@ -87,6 +87,8 @@ import {
   GenAiExtendedOperationNameValues,
 } from "./semconv/gen-ai-extended-attributes.js";
 import {
+  applyCommonGenAiAttributes,
+  applyPassthroughAttributes,
   getLlmMessagesAttributesForSpan,
   getToolDefinitionsForSpan,
   type EventLogger,
@@ -136,6 +138,7 @@ export function applyEmbeddingFinishAttributes(
   if (invocation.serverAddress != null) {
     attrs[SERVER_ADDRESS] = invocation.serverAddress;
   }
+  applyCommonGenAiAttributes(attrs, invocation);
   if (invocation.attributes) {
     Object.assign(attrs, invocation.attributes);
   }
@@ -179,6 +182,7 @@ export function applyCreateAgentFinishAttributes(
   if (invocation.serverAddress != null) {
     attrs[SERVER_ADDRESS] = invocation.serverAddress;
   }
+  applyCommonGenAiAttributes(attrs, invocation);
   if (invocation.attributes) {
     Object.assign(attrs, invocation.attributes);
   }
@@ -243,9 +247,11 @@ export function applyExecuteToolFinishAttributes(
       invocation.toolCallResult,
     ),
   );
+  applyCommonGenAiAttributes(attrs, invocation);
   if (invocation.attributes) {
     Object.assign(attrs, invocation.attributes);
   }
+  applyPassthroughAttributes(attrs, invocation.passthroughAttributes);
 
   span.setAttributes(attrs as Record<string, string | number | boolean>);
 }
@@ -340,9 +346,16 @@ export function applyInvokeAgentFinishAttributes(
       invocation.usageCacheReadInputTokens;
   }
 
-  let totalTokens = 0;
-  if (invocation.inputTokens != null) totalTokens += invocation.inputTokens;
-  if (invocation.outputTokens != null) totalTokens += invocation.outputTokens;
+  // Prefer the upstream-reported total; only compute (input + output) when the
+  // upstream did not provide a usable total.
+  let totalTokens: number;
+  if (invocation.totalTokens != null && invocation.totalTokens > 0) {
+    totalTokens = invocation.totalTokens;
+  } else {
+    totalTokens = 0;
+    if (invocation.inputTokens != null) totalTokens += invocation.inputTokens;
+    if (invocation.outputTokens != null) totalTokens += invocation.outputTokens;
+  }
   if (totalTokens > 0) {
     attrs[GEN_AI_USAGE_TOTAL_TOKENS] = totalTokens;
   }
@@ -383,9 +396,11 @@ export function applyInvokeAgentFinishAttributes(
     attrs,
     getToolDefinitionsForSpan(invocation.toolDefinitions),
   );
+  applyCommonGenAiAttributes(attrs, invocation);
   if (invocation.attributes) {
     Object.assign(attrs, invocation.attributes);
   }
+  applyPassthroughAttributes(attrs, invocation.passthroughAttributes);
 
   span.setAttributes(attrs as Record<string, string | number | boolean>);
 }
@@ -483,6 +498,7 @@ export function applyRetrievalFinishAttributes(
   }
 
   Object.assign(attrs, getRetrievalDocumentsAttributes(invocation.documents));
+  applyCommonGenAiAttributes(attrs, invocation);
   if (invocation.attributes) {
     Object.assign(attrs, invocation.attributes);
   }
@@ -574,6 +590,7 @@ export function applyRerankFinishAttributes(
       invocation.outputDocuments,
     ),
   );
+  applyCommonGenAiAttributes(attrs, invocation);
   if (invocation.attributes) {
     Object.assign(attrs, invocation.attributes);
   }
@@ -612,9 +629,11 @@ export function applyEntryFinishAttributes(
       invocation.outputMessages ?? [],
     ),
   );
+  applyCommonGenAiAttributes(attrs, invocation);
   if (invocation.attributes) {
     Object.assign(attrs, invocation.attributes);
   }
+  applyPassthroughAttributes(attrs, invocation.passthroughAttributes);
 
   span.setAttributes(attrs as Record<string, string | number | boolean>);
 }
@@ -638,9 +657,11 @@ export function applyReactStepFinishAttributes(
   if (invocation.round != null) {
     attrs[GEN_AI_REACT_ROUND] = invocation.round;
   }
+  applyCommonGenAiAttributes(attrs, invocation);
   if (invocation.attributes) {
     Object.assign(attrs, invocation.attributes);
   }
+  applyPassthroughAttributes(attrs, invocation.passthroughAttributes);
 
   span.setAttributes(attrs as Record<string, string | number | boolean>);
 }

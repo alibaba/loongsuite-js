@@ -14,6 +14,7 @@
 
 import type { Span } from "@opentelemetry/api";
 import type { GenAIError } from "../types.js";
+import { applyCommonGenAiAttributes } from "../span-utils.js";
 import type { MemoryInvocation } from "./memory-types.js";
 import {
   GEN_AI_OPERATION_NAME,
@@ -151,6 +152,7 @@ export function applyMemoryFinishAttributes(
     attrs[SERVER_PORT] = invocation.serverPort;
   }
   Object.assign(attrs, getMemoryContentAttributes(invocation, true));
+  applyCommonGenAiAttributes(attrs, invocation);
   if (invocation.attributes) {
     Object.assign(attrs, invocation.attributes);
   }
