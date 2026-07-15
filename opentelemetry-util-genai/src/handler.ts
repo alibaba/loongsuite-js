@@ -29,6 +29,7 @@ import { InvocationMetricsRecorder } from "./metrics.js";
 import {
   applyLlmFinishAttributes,
   applyErrorAttributes,
+  backfillCommonFromBaggage,
   maybeEmitLlmEvent,
   type EventLogger,
 } from "./span-utils.js";
@@ -75,6 +76,10 @@ export class TelemetryHandler {
   ): LLMInvocation {
     const spanName =
       `${invocation.operationName ?? "chat"} ${invocation.requestModel ?? ""}`.trim();
+    const parent = parentContext ?? context.active();
+    // Inherit ARMS GenAI common attributes (agent.name / user.id / session.id)
+    // from the enclosing Entry/Agent span via baggage, unless already set.
+    backfillCommonFromBaggage(invocation, parent);
     const span = this._tracer.startSpan(
       spanName,
       { kind: SpanKind.CLIENT, startTime },
@@ -82,11 +87,7 @@ export class TelemetryHandler {
     );
     invocation.monotonicStartS = performance.now() / 1000;
     invocation.span = span;
-    invocation.contextToken = trace.setSpan(
-      parentContext ?? context.active(),
-      span,
-    );
-    context.with(invocation.contextToken, () => {});
+    invocation.contextToken = trace.setSpan(parent, span);
     return invocation;
   }
 

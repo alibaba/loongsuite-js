@@ -101,6 +101,8 @@ export { ExtendedInvocationMetricsRecorder } from "./extended-metrics.js";
 export {
   applyCommonGenAiAttributes,
   applyPassthroughAttributes,
+  setCommonBaggage,
+  backfillCommonFromBaggage,
   getLlmCommonAttributes,
   getLlmSpanName,
   getLlmRequestAttributes,
