@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import type { Span } from "@opentelemetry/api";
-import { SpanStatusCode } from "@opentelemetry/api";
+import type { Span, Context } from "@opentelemetry/api";
+import { SpanStatusCode, propagation } from "@opentelemetry/api";
 import type {
   LLMInvocation,
   GenAIError,
@@ -390,6 +390,67 @@ export function applyPassthroughAttributes(
     if (value != null && !(key in attrs)) {
       attrs[key] = value;
     }
+  }
+}
+
+/** Common attributes carried across GenAI spans via OTel Baggage. */
+interface CommonGenAiAttrs {
+  agentName?: string | null;
+  userId?: string | null;
+  sessionId?: string | null;
+}
+
+/**
+ * Write the ARMS GenAI common attributes (agent.name / user.id / session.id)
+ * into the Baggage of a context, so that downstream GenAI spans created within
+ * that context can inherit them automatically.
+ *
+ * Only non-null values are written; existing baggage entries are preserved.
+ * Returns the context unchanged when there is nothing to write.
+ */
+export function setCommonBaggage(ctx: Context, attrs: CommonGenAiAttrs): Context {
+  let baggage = propagation.getBaggage(ctx) ?? propagation.createBaggage();
+  let changed = false;
+  if (attrs.agentName != null) {
+    baggage = baggage.setEntry(GEN_AI_AGENT_NAME, { value: String(attrs.agentName) });
+    changed = true;
+  }
+  if (attrs.userId != null) {
+    baggage = baggage.setEntry(GEN_AI_USER_ID, { value: String(attrs.userId) });
+    changed = true;
+  }
+  if (attrs.sessionId != null) {
+    baggage = baggage.setEntry(GEN_AI_SESSION_ID, { value: String(attrs.sessionId) });
+    changed = true;
+  }
+  return changed ? propagation.setBaggage(ctx, baggage) : ctx;
+}
+
+/**
+ * Backfill an invocation's common attributes from the Baggage of a context.
+ *
+ * Fill-only: a field is populated only when it is currently null/undefined, so
+ * explicitly-set values always win. Used by handlers when starting GenAI child
+ * spans so agent.name / user.id / session.id propagate from the enclosing
+ * Entry/Agent span without manual wiring on every child.
+ */
+export function backfillCommonFromBaggage(
+  invocation: CommonGenAiAttrs,
+  ctx: Context,
+): void {
+  const baggage = propagation.getBaggage(ctx);
+  if (!baggage) return;
+  if (invocation.agentName == null) {
+    const e = baggage.getEntry(GEN_AI_AGENT_NAME);
+    if (e) invocation.agentName = e.value;
+  }
+  if (invocation.userId == null) {
+    const e = baggage.getEntry(GEN_AI_USER_ID);
+    if (e) invocation.userId = e.value;
+  }
+  if (invocation.sessionId == null) {
+    const e = baggage.getEntry(GEN_AI_SESSION_ID);
+    if (e) invocation.sessionId = e.value;
   }
 }
 

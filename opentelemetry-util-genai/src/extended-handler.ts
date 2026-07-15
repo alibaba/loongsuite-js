@@ -21,7 +21,11 @@ import {
   type Span,
 } from "@opentelemetry/api";
 import { TelemetryHandler, type TelemetryHandlerOptions } from "./handler.js";
-import { applyErrorAttributes } from "./span-utils.js";
+import {
+  applyErrorAttributes,
+  backfillCommonFromBaggage,
+  setCommonBaggage,
+} from "./span-utils.js";
 import type { GenAIError } from "./types.js";
 import type {
   CreateAgentInvocation,
@@ -105,17 +109,21 @@ export class ExtendedTelemetryHandler extends TelemetryHandler {
     parentContext?: Context,
     startTime?: number,
   ): T {
-    const span = this._tracer.startSpan(
-      spanName,
-      { kind, startTime },
-      parentContext,
+    const parent = parentContext ?? context.active();
+    // Inherit ARMS GenAI common attributes (agent.name / user.id / session.id)
+    // from the enclosing Entry/Agent span via baggage, unless already set.
+    backfillCommonFromBaggage(
+      invocation as {
+        agentName?: string | null;
+        userId?: string | null;
+        sessionId?: string | null;
+      },
+      parent,
     );
+    const span = this._tracer.startSpan(spanName, { kind, startTime }, parentContext);
     invocation.monotonicStartS = performance.now() / 1000;
     invocation.span = span;
-    invocation.contextToken = trace.setSpan(
-      parentContext ?? context.active(),
-      span,
-    );
+    invocation.contextToken = trace.setSpan(parent, span);
     return invocation;
   }
 
@@ -133,7 +141,11 @@ export class ExtendedTelemetryHandler extends TelemetryHandler {
     const name = invocation.agentName
       ? `${GenAiOperationNameValues.CREATE_AGENT} ${invocation.agentName}`
       : GenAiOperationNameValues.CREATE_AGENT;
-    return this._startSpan(invocation, name, SpanKind.CLIENT, parentContext, startTime);
+    this._startSpan(invocation, name, SpanKind.CLIENT, parentContext, startTime);
+    if (invocation.contextToken) {
+      invocation.contextToken = setCommonBaggage(invocation.contextToken, invocation);
+    }
+    return invocation;
   }
 
   stopCreateAgent(invocation: CreateAgentInvocation, endTime?: number): CreateAgentInvocation {
@@ -292,7 +304,12 @@ export class ExtendedTelemetryHandler extends TelemetryHandler {
     const name = invocation.agentName
       ? `${GenAiOperationNameValues.INVOKE_AGENT} ${invocation.agentName}`
       : GenAiOperationNameValues.INVOKE_AGENT;
-    return this._startSpan(invocation, name, SpanKind.CLIENT, parentContext, startTime);
+    this._startSpan(invocation, name, SpanKind.CLIENT, parentContext, startTime);
+    // Publish common attributes to baggage so downstream GenAI spans inherit.
+    if (invocation.contextToken) {
+      invocation.contextToken = setCommonBaggage(invocation.contextToken, invocation);
+    }
+    return invocation;
   }
 
   stopInvokeAgent(invocation: InvokeAgentInvocation, endTime?: number): InvokeAgentInvocation {
@@ -515,13 +532,18 @@ export class ExtendedTelemetryHandler extends TelemetryHandler {
     parentContext?: Context,
     startTime?: number,
   ): EntryInvocation {
-    return this._startSpan(
+    this._startSpan(
       invocation,
       "enter_ai_application_system",
       SpanKind.SERVER,
       parentContext,
       startTime,
     );
+    // Publish common attributes to baggage so downstream GenAI spans inherit.
+    if (invocation.contextToken) {
+      invocation.contextToken = setCommonBaggage(invocation.contextToken, invocation);
+    }
+    return invocation;
   }
 
   stopEntry(invocation: EntryInvocation, endTime?: number): EntryInvocation {

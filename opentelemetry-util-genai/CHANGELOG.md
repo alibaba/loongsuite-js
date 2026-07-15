@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.0-beta.10 (2026-07-14)
+
+### Features
+
+- **公共属性 Baggage 自动透传**：`startEntry` / `startInvokeAgent` / `startCreateAgent` 现在会把已设置的 `gen_ai.agent.name` / `gen_ai.user.id` / `gen_ai.session.id` 写入 OpenTelemetry Baggage;在该 Entry/Agent span 生命周期内(以其 `contextToken` 为父 context 创建的)LLM / Tool / ReAct Step / Embedding / Retrieval / Rerank / Memory 等 GenAI 子 span 会**自动继承**这三个公共属性,无需在每个子 invocation 上手动设置。
+  - **fill-only**:仅当子 invocation 对应字段为空时才回填,显式设置的值始终优先。
+  - 仅作用于本工具创建的 GenAI span;通过 OTel SDK 直接创建的普通业务 span 不受影响。
+  - 探针创建的子 span 能否继承取决于探针是否读取 baggage(本工具负责把值写入 baggage)。
+- 新增并导出 helper `setCommonBaggage(ctx, attrs)` / `backfillCommonFromBaggage(invocation, ctx)`。
+
+### Bug Fixes
+
+- 清理基础 `TelemetryHandler.startLlm` 中一处无副作用的空操作 `context.with(...)`。
+
 ## 0.1.0-beta.9 (2026-07-08)
 
 ### Features
