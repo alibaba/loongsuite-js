@@ -107,6 +107,21 @@ step_3:  LLM(最终回答, 无工具)
 - `gen_ai.react.round`：从 1 开始的轮次号。若不提供，转换器尝试从 step.id 末尾数字解析（如 `...:s3` → 3）。解析正则为 `/(?:^|[_:s])(\d+)$/`，只识别 `:sN`、`_N` 或纯数字结尾的 step.id 后缀。[SHOULD] 显式提供更可靠。
 - `gen_ai.react.finish_reason`：本轮结束原因。若不提供，转换器从本 step 最后一条 `llm.response` 的 `finish_reasons` 推导。
 
+### 2.5 [SHOULD] 事件按 step 顺序输出（流式消费方约束）
+
+**同一 turn 内，一个 step 的所有事件应连续输出——不应把某 step 的尾部事件穿插到后续 step 开始之后。**
+
+- **批处理转换（`convertEventLogToTrace`）与顺序无关**：它按分组键（§2）重组，事件乱序也能得到正确结果。本条 [SHOULD] **不改变**这一性质。
+- **流式/增量消费方**（如 pilot `OtlpTraceFlusher` 用 `TurnStreamSession` 边采边转）无法看到整个 turn，只能在**后续 step 出现后**判定前序 step 完成。为容忍有限乱序，它保留一个 **K 个 step 的回看窗口**（look-back window）：一个 step 只有在其后**又出现了 K 个新 step.id** 时（或 turn 结束时）才被 finalize 并导出。
+- **超出该窗口迟到的事件会被丢弃**（其 step 的 span 已导出、无法再挂接），并产生 `LATE_STEP_DROP` 告警。**当前实现 K=2。**
+
+**已知合规情况**：
+- codex / cursor / opencode / qoder 系列：事件严格按 step 顺序，K=0。
+- claude-code：存在**同毫秒 tie**——下一步的 `llm.request` 与本步最后一个 `tool.result` 落在同一毫秒、`llm.request` 先写；交错距离恒为 1，**K=2 可容忍**，无需上游改动。
+- **[MUST 若面向流式消费]** 若某上游的乱序跨度可能超过 K（如把一个 step 的事件与其它 step 大幅交错、或把首个 step 的事件甩到 turn 末尾），**必须**在其**输入侧**修正为按 step 顺序输出；否则流式消费下会丢 span（有 `LATE_STEP_DROP` 告警可定位）。
+
+> 与 §7 的关系：§7 已要求 `messages_delta` 在 turn 内**单调追加、不能乱序**（内容累积需要顺序）；本条是更一般的 step 级顺序建议，服务于流式消费方的增量 finalize。
+
 ---
 
 ## 3. 字段映射总表

@@ -278,6 +278,37 @@ convertEventLogToTrace(records, {
   `gen_ai.input.messages` 这类大字段。
 - 不传 `passthroughKeys` 时行为完全不变。
 
+### 流式转换(`createTurnStreamSession`)
+
+`convertEventLogToTrace` 一次性转换整个 turn——必须把该 turn 的全部记录持有在内存中。
+对于**超长 turn**(数千轮 ReAct)这可能耗尽内存。`createTurnStreamSession` 对单个 turn
+**增量转换**:首次 `push` 时创建并保持 ENTRY/AGENT 打开,每个完整的 STEP 在 finalize 时
+转换并导出(随即释放)其子 span,`end()` 时才关闭 ENTRY/AGENT 并写入 turn 级聚合。
+内存与 turn 的 step 数无关、保持有界。
+
+```ts
+import { createTurnStreamSession } from "@loongsuite/otel-util-genai";
+
+const session = createTurnStreamSession({ handler, passthroughKeys });
+session.push(batch1); // 增量喂入(如每次轮询一批);完整的 step 此刻即转换
+session.push(batch2);
+const result = session.end(); // 关闭 ENTRY/AGENT,flush 最后的 step
+
+// result: { traceId?, spanCount, lateDroppedRecordCount, warnings }
+if (result.lateDroppedRecordCount > 0) raiseAlarm(result.warnings);
+```
+
+- **一个 session 对应一个 turn**;`push`/`end` 必须串行调用(会话持有可变状态)。对于
+  边界明确、已完整的 turn,批处理 `convertEventLogToTrace` 仍是合适选择。
+- **`graceSteps`(默认 2)**——look-back 窗口:一个 step 只有在其后又出现 `graceSteps`
+  个新 `gen_ai.step.id` 时(或 `end()` 时)才被 finalize,以容忍上游有限的乱序发射
+  (例如某 step 的尾部 `tool.result` 与下一 step 落在同一毫秒)。到达已 finalize step 的
+  记录会被丢弃、计入 `lateDroppedRecordCount` 并产生 `LATE_STEP_DROP` 警告——上游的顺序
+  约定见 `EVENT_LOG_TO_TRACE_SPEC.md` §2.5。
+- **`session.pendingRecordCount`**——当前缓冲(未 finalize)的记录数,受 grace 窗口约束,
+  可用于监控驻留。
+- 批处理 `convertEventLogToTrace` 未改动,且与流式共用底层转换,两条路径产出等价的 span。
+
 ## 许可证
 
 Apache License 2.0

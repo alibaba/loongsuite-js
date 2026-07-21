@@ -191,7 +191,7 @@ function parseJsonField(value: unknown): unknown {
 }
 
 /** Parse messages as InputMessage[]. Accepts string (JSON) or parsed array. */
-function parseInputMessages(raw: unknown): InputMessage[] | undefined {
+export function parseInputMessages(raw: unknown): InputMessage[] | undefined {
   const parsed = parseJsonField(raw);
   if (!Array.isArray(parsed)) return undefined;
   const out: InputMessage[] = [];
@@ -205,7 +205,7 @@ function parseInputMessages(raw: unknown): InputMessage[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
-function parseOutputMessages(raw: unknown): OutputMessage[] | undefined {
+export function parseOutputMessages(raw: unknown): OutputMessage[] | undefined {
   const parsed = parseJsonField(raw);
   if (!Array.isArray(parsed)) return undefined;
   const out: OutputMessage[] = [];
@@ -355,6 +355,87 @@ export function buildEntryInvocation(
   });
 }
 
+/**
+ * Running accumulator of llm.response token usage. Shared by the batch
+ * converter (buildInvokeAgentInvocation) and the streaming session so both
+ * produce identical AGENT-level aggregates.
+ */
+export interface ResponseUsageAcc {
+  totalInput: number;
+  totalOutput: number;
+  totalCacheCreate: number;
+  totalCacheRead: number;
+  totalReported: number;
+  allReportedTotal: boolean;
+  sawAny: boolean;
+  responseModel: string | null;
+  lastResponseId: string | null;
+}
+
+export function newResponseUsageAcc(): ResponseUsageAcc {
+  return {
+    totalInput: 0,
+    totalOutput: 0,
+    totalCacheCreate: 0,
+    totalCacheRead: 0,
+    totalReported: 0,
+    allReportedTotal: true,
+    sawAny: false,
+    responseModel: null,
+    lastResponseId: null,
+  };
+}
+
+/** Fold one record into the accumulator; no-op for non-llm.response records. */
+export function accumulateResponseUsage(acc: ResponseUsageAcc, r: EventLogRecord): void {
+  if (r["event.name"] !== EventName.LLM_RESPONSE) return;
+  const inT = asNumber(r["gen_ai.usage.input_tokens"]);
+  const outT = asNumber(r["gen_ai.usage.output_tokens"]);
+  const ccT = asNumber(r["gen_ai.usage.cache_creation.input_tokens"]);
+  const crT = asNumber(r["gen_ai.usage.cache_read.input_tokens"]);
+  const tT = asNumber(r["gen_ai.usage.total_tokens"]);
+  if (inT != null) {
+    acc.totalInput += inT;
+    acc.sawAny = true;
+  }
+  if (outT != null) {
+    acc.totalOutput += outT;
+    acc.sawAny = true;
+  }
+  if (inT != null || outT != null) {
+    // A reported total of 0 on a token-bearing response is degenerate; treat
+    // it as "not reported" so the whole AGENT falls back to summed
+    // input+output (mirrors the LLM span's `> 0` guard).
+    if (tT != null && tT > 0) acc.totalReported += tT;
+    else acc.allReportedTotal = false;
+  }
+  if (ccT != null) acc.totalCacheCreate += ccT;
+  if (crT != null) acc.totalCacheRead += crT;
+  acc.responseModel = asString(r["gen_ai.response.model"]) ?? acc.responseModel;
+  acc.lastResponseId = asString(r["gen_ai.response.id"]) ?? acc.lastResponseId;
+}
+
+/** Derive AGENT invocation usage fields from an accumulator. */
+export function usageFieldsFromAcc(acc: ResponseUsageAcc): {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  usageCacheCreationInputTokens: number | null;
+  usageCacheReadInputTokens: number | null;
+  responseModelName: string | null;
+  responseId: string | null;
+} {
+  return {
+    inputTokens: acc.sawAny ? acc.totalInput : null,
+    outputTokens: acc.sawAny ? acc.totalOutput : null,
+    totalTokens: acc.sawAny && acc.allReportedTotal && acc.totalReported > 0 ? acc.totalReported : null,
+    usageCacheCreationInputTokens: acc.totalCacheCreate > 0 ? acc.totalCacheCreate : null,
+    usageCacheReadInputTokens: acc.totalCacheRead > 0 ? acc.totalCacheRead : null,
+    responseModelName: acc.responseModel,
+    responseId: acc.lastResponseId,
+  };
+}
+
 /** Build an InvokeAgentInvocation by aggregating turn-level metadata. */
 export function buildInvokeAgentInvocation(
   turnRecords: EventLogRecord[],
@@ -371,45 +452,10 @@ export function buildInvokeAgentInvocation(
       .find((v): v is string => !!v) ??
     null;
 
-  // Aggregate token usage from llm.response events.
-  let totalInput = 0;
-  let totalOutput = 0;
-  let totalCacheCreate = 0;
-  let totalCacheRead = 0;
-  let sawAny = false;
-  // Sum of upstream-reported totals; only usable when EVERY token-bearing
-  // response reported one, so we never mix reported + computed values.
-  let totalReported = 0;
-  let allReportedTotal = true;
-  let responseModel: string | null = null;
-  let lastResponseId: string | null = null;
-  for (const r of turnRecords) {
-    if (r["event.name"] !== EventName.LLM_RESPONSE) continue;
-    const inT = asNumber(r["gen_ai.usage.input_tokens"]);
-    const outT = asNumber(r["gen_ai.usage.output_tokens"]);
-    const ccT = asNumber(r["gen_ai.usage.cache_creation.input_tokens"]);
-    const crT = asNumber(r["gen_ai.usage.cache_read.input_tokens"]);
-    const tT = asNumber(r["gen_ai.usage.total_tokens"]);
-    if (inT != null) {
-      totalInput += inT;
-      sawAny = true;
-    }
-    if (outT != null) {
-      totalOutput += outT;
-      sawAny = true;
-    }
-    if (inT != null || outT != null) {
-      // A reported total of 0 on a token-bearing response is degenerate; treat
-      // it as "not reported" so the whole AGENT falls back to summed
-      // input+output (mirrors the LLM span's `> 0` guard).
-      if (tT != null && tT > 0) totalReported += tT;
-      else allReportedTotal = false;
-    }
-    if (ccT != null) totalCacheCreate += ccT;
-    if (crT != null) totalCacheRead += crT;
-    responseModel = asString(r["gen_ai.response.model"]) ?? responseModel;
-    lastResponseId = asString(r["gen_ai.response.id"]) ?? lastResponseId;
-  }
+  // Aggregate token usage from llm.response events (shared with streaming path).
+  const usageAcc = newResponseUsageAcc();
+  for (const r of turnRecords) accumulateResponseUsage(usageAcc, r);
+  const usage = usageFieldsFromAcc(usageAcc);
 
   const llmReq = turnRecords.find((r) => r["event.name"] === EventName.LLM_REQUEST);
   const llmResp = [...turnRecords]
@@ -441,13 +487,13 @@ export function buildInvokeAgentInvocation(
     userId: common?.userId ?? null,
     sessionId: common?.sessionId ?? null,
     requestModel,
-    responseModelName: responseModel,
-    responseId: lastResponseId,
-    inputTokens: sawAny ? totalInput : null,
-    outputTokens: sawAny ? totalOutput : null,
-    totalTokens: sawAny && allReportedTotal && totalReported > 0 ? totalReported : null,
-    usageCacheCreationInputTokens: totalCacheCreate > 0 ? totalCacheCreate : null,
-    usageCacheReadInputTokens: totalCacheRead > 0 ? totalCacheRead : null,
+    responseModelName: usage.responseModelName,
+    responseId: usage.responseId,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    totalTokens: usage.totalTokens,
+    usageCacheCreationInputTokens: usage.usageCacheCreationInputTokens,
+    usageCacheReadInputTokens: usage.usageCacheReadInputTokens,
     inputMessages,
     outputMessages,
     systemInstruction: sysRec ? parseSystemInstructions(sysRec["gen_ai.system_instructions"]) ?? [] : [],

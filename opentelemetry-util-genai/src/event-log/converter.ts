@@ -238,7 +238,7 @@ function convertTurn(
   return spanCount;
 }
 
-function convertStep(
+export function convertStep(
   step: StepGroup,
   handler: ExtendedTelemetryHandler,
   agentCtx: Context | undefined,
@@ -412,7 +412,7 @@ function convertToolPair(
 
 /* ------------------------------ time helpers ----------------------------- */
 
-function minTime(records: EventLogRecord[]): number {
+export function minTime(records: EventLogRecord[]): number {
   let min = Number.POSITIVE_INFINITY;
   for (const r of records) {
     const ms = readNanoMs(r["time_unix_nano"]);
@@ -421,7 +421,7 @@ function minTime(records: EventLogRecord[]): number {
   return Number.isFinite(min) ? min : 0;
 }
 
-function maxTime(records: EventLogRecord[]): number {
+export function maxTime(records: EventLogRecord[]): number {
   let max = 0;
   for (const r of records) {
     const ms = readNanoMs(r["time_unix_nano"]);

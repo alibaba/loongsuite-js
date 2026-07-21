@@ -286,6 +286,43 @@ convertEventLogToTrace(records, {
   avoid large payload fields such as `gen_ai.input.messages`.
 - Omit `passthroughKeys` to keep behavior unchanged.
 
+### Streaming conversion (`createTurnStreamSession`)
+
+`convertEventLogToTrace` converts a whole turn at once — it must hold every
+record of the turn in memory. For **very long turns** (thousands of ReAct steps)
+this can exhaust memory. `createTurnStreamSession` converts a single turn
+**incrementally**: ENTRY/AGENT are opened on the first `push` and kept open,
+each completed STEP is converted and its child spans exported (and freed) as it
+finalizes, and ENTRY/AGENT are closed on `end()` with the turn-level aggregates.
+Memory stays bounded regardless of how many steps the turn has.
+
+```ts
+import { createTurnStreamSession } from "@loongsuite/otel-util-genai";
+
+const session = createTurnStreamSession({ handler, passthroughKeys });
+session.push(batch1); // feed records incrementally (e.g. per poll); complete steps convert now
+session.push(batch2);
+const result = session.end(); // close ENTRY/AGENT, flush the last steps
+
+// result: { traceId?, spanCount, lateDroppedRecordCount, warnings }
+if (result.lateDroppedRecordCount > 0) raiseAlarm(result.warnings);
+```
+
+- **One session per turn.** `push`/`end` must be called serially (the session
+  holds mutable state). The batch converter remains the right choice for
+  bounded, already-complete turns.
+- **`graceSteps` (default 2)** — look-back window: a step is finalized only once
+  `graceSteps` newer `gen_ai.step.id`s have appeared (or at `end()`). This
+  tolerates bounded out-of-order emission (e.g. a step's trailing `tool.result`
+  sharing the next step's millisecond). Records arriving for an
+  already-finalized step are dropped, counted in `lateDroppedRecordCount`, and
+  reported via a `LATE_STEP_DROP` warning — see `EVENT_LOG_TO_TRACE_SPEC.md`
+  §2.5 for the ordering expectation this places on producers.
+- **`session.pendingRecordCount`** — records currently buffered (not yet
+  finalized); bounded by the grace window, useful for monitoring retention.
+- The batch `convertEventLogToTrace` is unchanged and shares the same underlying
+  conversion, so both paths produce equivalent spans.
+
 ## License
 
 Apache License 2.0
