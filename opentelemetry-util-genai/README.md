@@ -294,12 +294,22 @@ this can exhaust memory. `createTurnStreamSession` converts a single turn
 **incrementally**: ENTRY/AGENT are opened on the first `push` and kept open,
 each completed STEP is converted and its child spans exported (and freed) as it
 finalizes, and ENTRY/AGENT are closed on `end()` with the turn-level aggregates.
-Memory stays bounded regardless of how many steps the turn has.
+The live-span and unfinalized-event working set is bounded by the grace window.
+Compact finalized IDs remain O(step count), and accumulated input messages
+remain O(total input size); streaming avoids retaining completed spans and the
+batch converter's retained O(N²) message snapshots rather than claiming
+constant memory for arbitrary input content.
 
 ```ts
 import { createTurnStreamSession } from "@loongsuite/otel-util-genai";
 
-const session = createTurnStreamSession({ handler, passthroughKeys });
+const session = createTurnStreamSession({
+  handler,
+  passthroughKeys,
+  // Optional, but authoritative when supplied:
+  traceId,
+  parentSpanId,
+});
 session.push(batch1); // feed records incrementally (e.g. per poll); complete steps convert now
 session.push(batch2);
 const result = session.end(); // close ENTRY/AGENT, flush the last steps
@@ -311,6 +321,12 @@ if (result.lateDroppedRecordCount > 0) raiseAlarm(result.warnings);
 - **One session per turn.** `push`/`end` must be called serially (the session
   holds mutable state). The batch converter remains the right choice for
   bounded, already-complete turns.
+- **Trace context must be known before ENTRY starts.** Optional `traceId` and
+  `parentSpanId` constructor options are authoritative. When omitted, the first
+  valid event context observed before the first parent record starts ENTRY is
+  used; otherwise the SDK allocates a trace ID. Context arriving after ENTRY
+  starts cannot re-parent existing spans and produces
+  `LATE_TRACE_CONTEXT_IGNORED`. `parentSpanId` requires `traceId`.
 - **`graceSteps` (default 2)** — look-back window: a step is finalized only once
   `graceSteps` newer `gen_ai.step.id`s have appeared (or at `end()`). This
   tolerates bounded out-of-order emission (e.g. a step's trailing `tool.result`
@@ -318,8 +334,12 @@ if (result.lateDroppedRecordCount > 0) raiseAlarm(result.warnings);
   already-finalized step are dropped, counted in `lateDroppedRecordCount`, and
   reported via a `LATE_STEP_DROP` warning — see `EVENT_LOG_TO_TRACE_SPEC.md`
   §2.5 for the ordering expectation this places on producers.
-- **`session.pendingRecordCount`** — records currently buffered (not yet
-  finalized); bounded by the grace window, useful for monitoring retention.
+- Subagent records are released when their parent TOOL finalizes. Child records
+  arriving later are dropped with `LATE_SUBAGENT_DROP`; children that never
+  find a parent are dropped at `end()` with `UNMATCHED_SUBAGENT_DROP`.
+- **`session.pendingRecordCount`** — all parent-step, subagent, and user-input
+  records currently retained by the session. Parent-step retention is governed
+  by the grace window, but a single open step may contain many records.
 - The batch `convertEventLogToTrace` is unchanged and shares the same underlying
   conversion, so both paths produce equivalent spans.
 

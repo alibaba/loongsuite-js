@@ -4,16 +4,18 @@
 
 ### Features
 
-- **流式 Event Log → Trace 转换 API**：新增 `createTurnStreamSession` / `TurnStreamSession`。单个 turn 的生命周期为 `push(records)` → `end()`：ENTRY/AGENT 在首次 push 时创建并**保持打开**，每个**完整的 step** 增量转换、其子 span 立即导出并释放，turn 结束时才关闭 ENTRY/AGENT 并写入 turn 级聚合。使内存与 turn 内 step 数解耦（适用于数千轮 react 的超长 turn，规避一次性转换的 OOM）。
+- **流式 Event Log → Trace 转换 API**：新增 `createTurnStreamSession` / `TurnStreamSession`。单个 turn 的生命周期为 `push(records)` → `end()`：ENTRY/AGENT 在首次 push 时创建并**保持打开**，每个**完整的 step** 增量转换、其子 span 立即导出并释放，turn 结束时才关闭 ENTRY/AGENT 并写入 turn 级聚合。活跃 span 与未 finalize 事件的工作集受 grace 窗口限制，避免一次性保留全部已完成 span 和 O(N²) 消息快照；已 finalize ID 与累计输入消息仍分别随 step 数和输入总量线性增长。
+  - **显式 trace context**：可通过 `traceId` / `parentSpanId` 在创建 session 时提供权威父上下文。不传时使用 ENTRY 创建前观察到的 event context；ENTRY 创建后的冲突 context 以 `LATE_TRACE_CONTEXT_IGNORED` 告警。
   - **`graceSteps`（look-back 窗口，默认 2）**：一个 step 只有在其后又出现 `graceSteps` 个新 step.id 时才 finalize，容忍上游有限的乱序发射（如同毫秒 tie 导致的 distance-1 交错）。
-  - **`lateDroppedRecordCount` + `LATE_STEP_DROP` 警告**：超出 look-back 窗口的迟到记录会被丢弃并计数/告警，供调用方观测（而非静默丢失）。
-  - **`pendingRecordCount` 只读探针**：当前缓冲(未 finalize)的记录数，恒定在 grace 窗口内，可用于监控驻留。
+  - **可观测的迟到丢弃**：超出 look-back 窗口的父记录以 `LATE_STEP_DROP` 告警；父 TOOL finalize 后到达的 subagent 记录以 `LATE_SUBAGENT_DROP` 告警；找不到父 TOOL 的 subagent 记录以 `UNMATCHED_SUBAGENT_DROP` 告警。均计入 `lateDroppedRecordCount`。
+  - **`pendingRecordCount` 只读探针**：统计 session 当前持有的父 step、subagent 和用户输入记录，用于监控事件驻留。
 - **SPEC §2.5「事件按 step 顺序输出」约束**：批处理转换仍与顺序无关；流式消费方以 K 个 step 的 look-back 窗口判定 step 完成，据此约定上游应连续输出同一 step 的事件。
 
 ### Internal
 
 - 抽取共享的 `accumulateResponseUsage` / `newResponseUsageAcc` / `usageFieldsFromAcc`（token 聚合的单一真源，批处理 `buildInvokeAgentInvocation` 与流式会话共用，行为等价）；导出 `parseInputMessages` / `parseOutputMessages`。
-- **批处理路径 `convertEventLogToTrace` / `convertTurn` 保持不变**：流式作为独立 API，现有全部单测(222，含 1 个需 `--expose-gc` 的堆测量)与逐 span 等价对拍全绿。
+- 流式分批场景在 STEP finalize 前增量刷新 `system_instructions` / `tool_definitions`，并在 `end()` 时回填 AGENT，保持与批处理字段一致。
+- **批处理路径 `convertEventLogToTrace` / `convertTurn` 保持不变**：流式作为独立 API，现有全部单测（含需 `--expose-gc` 的堆测量）与逐 span 等价对拍全绿。
 
 ## 0.1.0-beta.10 (2026-07-14)
 

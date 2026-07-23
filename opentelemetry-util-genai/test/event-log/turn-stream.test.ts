@@ -21,6 +21,8 @@ import {
   GEN_AI_USAGE_TOTAL_TOKENS,
   GEN_AI_INPUT_MESSAGES,
   GEN_AI_RESPONSE_ID,
+  GEN_AI_SYSTEM_INSTRUCTIONS,
+  GEN_AI_TOOL_DEFINITIONS,
   GenAiSpanKindValues,
 } from "../../src/semconv/gen-ai-extended-attributes.js";
 
@@ -218,6 +220,86 @@ describe("TurnStreamSession", () => {
     expect(new Set(spans.map((s) => s.spanContext().traceId)).size).toBe(1);
   });
 
+  it("releases subagent records as soon as their parent step finalizes", async () => {
+    const recs = loadFixture("subagent-simple");
+    const { exporter, provider, handler } = makeHarness();
+    const s = createTurnStreamSession({ handler, graceSteps: 0 });
+    const nextReq: EventLogRecord = {
+      ...recs[0]!,
+      time_unix_nano: "1780000006000000000",
+      "event.id": "p-req-2",
+      "gen_ai.step.id": "sess-p:t1:s2",
+    };
+    const nextResp: EventLogRecord = {
+      ...recs[1]!,
+      time_unix_nano: "1780000007000000000",
+      "event.id": "p-resp-2",
+      "gen_ai.step.id": "sess-p:t1:s2",
+      "gen_ai.response.id": "p-resp-2",
+      "gen_ai.response.finish_reasons": ["stop"],
+    };
+
+    s.push(recs);
+    expect(s.pendingRecordCount).toBe(recs.length);
+    s.push([nextReq, nextResp]); // finalizes s1 and its nested subagent
+    expect(s.pendingRecordCount).toBe(2); // only s2 remains buffered
+
+    const result = s.end();
+    await provider.forceFlush();
+    expect(result.lateDroppedRecordCount).toBe(0);
+    expect(s.pendingRecordCount).toBe(0);
+    expect(byKind(exporter.getFinishedSpans(), GenAiSpanKindValues.AGENT)).toHaveLength(2);
+  });
+
+  it("drops and warns on subagent records arriving after the parent tool finalized", async () => {
+    const recs = loadFixture("subagent-simple");
+    const { exporter, provider, handler } = makeHarness();
+    const s = createTurnStreamSession({ handler, graceSteps: 0 });
+    const parentRecords = [recs[0]!, recs[1]!, recs[2]!, recs[5]!];
+    const nextReq: EventLogRecord = {
+      ...recs[0]!,
+      time_unix_nano: "1780000006000000000",
+      "event.id": "p-req-2",
+      "gen_ai.step.id": "sess-p:t1:s2",
+    };
+    const nextResp: EventLogRecord = {
+      ...recs[1]!,
+      time_unix_nano: "1780000007000000000",
+      "event.id": "p-resp-2",
+      "gen_ai.step.id": "sess-p:t1:s2",
+      "gen_ai.response.id": "p-resp-2",
+      "gen_ai.response.finish_reasons": ["stop"],
+    };
+
+    s.push(parentRecords);
+    s.push([nextReq, nextResp]); // finalizes the parent tool with no child records
+    s.push([recs[3]!, recs[4]!]); // both child records are now too late
+    expect(s.pendingRecordCount).toBe(2); // late children were not retained
+
+    const result = s.end();
+    await provider.forceFlush();
+    expect(result.lateDroppedRecordCount).toBe(2);
+    expect(result.warnings.some((w) => w.includes("LATE_SUBAGENT_DROP"))).toBe(true);
+    expect(byKind(exporter.getFinishedSpans(), GenAiSpanKindValues.AGENT)).toHaveLength(1);
+  });
+
+  it("drops unmatched subagent records and releases them at end", () => {
+    const recs = loadFixture("subagent-simple");
+    const { handler } = makeHarness();
+    const s = createTurnStreamSession({ handler });
+
+    s.push([recs[3]!, recs[4]!]);
+    expect(s.pendingRecordCount).toBe(2);
+    const result = s.end();
+
+    expect(result.spanCount).toBe(0);
+    expect(result.lateDroppedRecordCount).toBe(2);
+    expect(result.warnings.some((w) => w.includes("UNMATCHED_SUBAGENT_DROP"))).toBe(
+      true,
+    );
+    expect(s.pendingRecordCount).toBe(0);
+  });
+
   it("counts + warns on late records beyond the grace window (no duplicate subtree)", async () => {
     const { exporter, provider, handler } = makeHarness();
     const [s1req, s1resp, s2req, s2resp] = twoStepFixture();
@@ -301,6 +383,32 @@ describe("TurnStreamSession", () => {
       expect(fa.attributes[GEN_AI_USAGE_INPUT_TOKENS]).toBe(wa.attributes[GEN_AI_USAGE_INPUT_TOKENS]);
       expect(fa.attributes[GEN_AI_USAGE_OUTPUT_TOKENS]).toBe(wa.attributes[GEN_AI_USAGE_OUTPUT_TOKENS]);
     });
+
+    it("applies turn fields that arrive after ENTRY starts but before step finalization", async () => {
+      const records = twoStepFixture();
+      records[3]!["gen_ai.system_instructions"] = JSON.stringify([
+        { type: "text", content: "late system instruction" },
+      ]);
+      records[3]!["gen_ai.tool.definitions"] = JSON.stringify([
+        { type: "function", name: "late_tool", description: "late definition" },
+      ]);
+
+      const { spans: batch } = await runBatch(records);
+      const { spans: stream } = await runStream(records.map((record) => [record]));
+      for (const kind of [GenAiSpanKindValues.AGENT, GenAiSpanKindValues.LLM]) {
+        const batchSpans = byKind(batch, kind);
+        const streamSpans = byKind(stream, kind);
+        expect(streamSpans).toHaveLength(batchSpans.length);
+        for (let i = 0; i < batchSpans.length; i++) {
+          expect(streamSpans[i]!.attributes[GEN_AI_SYSTEM_INSTRUCTIONS]).toBe(
+            batchSpans[i]!.attributes[GEN_AI_SYSTEM_INSTRUCTIONS],
+          );
+          expect(streamSpans[i]!.attributes[GEN_AI_TOOL_DEFINITIONS]).toBe(
+            batchSpans[i]!.attributes[GEN_AI_TOOL_DEFINITIONS],
+          );
+        }
+      }
+    });
   });
 
   it("links ENTRY to upstream parent_span_id from an 'other' event (fragmented)", async () => {
@@ -349,6 +457,69 @@ describe("TurnStreamSession", () => {
     };
     const { spans } = await runStream([[req, resp]]);
     for (const s of spans) expect(s.spanContext().traceId).toBe(TRACE_ID);
+  });
+
+  it("uses explicit trace context when records are split across pushes", async () => {
+    const TRACE_ID = "f".repeat(32);
+    const PARENT_SPAN_ID = "0123456789abcdef";
+    const [sourceReq, sourceResp] = twoStepFixture();
+    const req = { ...sourceReq!, trace_id: undefined };
+    const resp = { ...sourceResp!, trace_id: TRACE_ID };
+    const { exporter, provider, handler } = makeHarness();
+    const s = createTurnStreamSession({
+      handler,
+      traceId: TRACE_ID,
+      parentSpanId: PARENT_SPAN_ID,
+    });
+
+    s.push([req]);
+    s.push([resp]);
+    const result = s.end();
+    await provider.forceFlush();
+    const spans = exporter.getFinishedSpans();
+    const entry = spanOf(spans, GenAiSpanKindValues.ENTRY);
+    expect(entry.parentSpanId).toBe(PARENT_SPAN_ID);
+    for (const span of spans) expect(span.spanContext().traceId).toBe(TRACE_ID);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("warns when trace context arrives after ENTRY has started", async () => {
+    const LATE_TRACE_ID = "e".repeat(32);
+    const [sourceReq, sourceResp] = twoStepFixture();
+    const req = { ...sourceReq!, trace_id: undefined };
+    const resp = { ...sourceResp!, trace_id: LATE_TRACE_ID };
+    const { exporter, provider, handler } = makeHarness();
+    const s = createTurnStreamSession({ handler });
+
+    s.push([req]); // ENTRY starts with an SDK-allocated trace ID
+    const allocatedTraceId = s.traceId;
+    expect(allocatedTraceId).toBeDefined();
+    expect(allocatedTraceId).not.toBe(LATE_TRACE_ID);
+    s.push([resp]);
+    const result = s.end();
+    await provider.forceFlush();
+
+    for (const span of exporter.getFinishedSpans()) {
+      expect(span.spanContext().traceId).toBe(allocatedTraceId);
+    }
+    expect(result.warnings.some((w) => w.includes("LATE_TRACE_CONTEXT_IGNORED"))).toBe(
+      true,
+    );
+  });
+
+  it("validates explicit trace context options", () => {
+    expect(() => createTurnStreamSession({ traceId: "not-a-trace-id" })).toThrow(
+      TypeError,
+    );
+    expect(() =>
+      createTurnStreamSession({ parentSpanId: "0123456789abcdef" }),
+    ).toThrow(TypeError);
+    expect(() =>
+      createTurnStreamSession({
+        traceId: "f".repeat(32),
+        parentSpanId: "not-a-span-id",
+      }),
+    ).toThrow(TypeError);
   });
 
   it("strict mode throws when warnings occur", () => {

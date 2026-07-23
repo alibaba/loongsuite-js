@@ -44,6 +44,18 @@ import {
 export interface TurnStreamOptions {
   handler?: ExtendedTelemetryHandler;
   passthroughKeys?: string[];
+  /**
+   * Authoritative trace ID for the turn. When omitted, the first valid
+   * `trace_id` observed before ENTRY starts is used; if none is available,
+   * the SDK allocates one. A trace ID arriving after ENTRY starts cannot
+   * re-parent existing spans and is reported as LATE_TRACE_CONTEXT_IGNORED.
+   */
+  traceId?: string;
+  /**
+   * Optional upstream parent span ID. This requires `traceId` and is used as
+   * the ENTRY span's parent. When omitted, a synthetic parent span ID is used.
+   */
+  parentSpanId?: string;
   /** When true, end() throws EventLogConversionError if any warnings occurred. */
   strict?: boolean;
   /**
@@ -62,7 +74,7 @@ export interface TurnStreamOptions {
 export interface TurnStreamResult {
   traceId?: string;
   spanCount: number;
-  /** Records dropped because they arrived after their step was finalized. */
+  /** Late or unmatched parent/subagent records that could not be attached. */
   lateDroppedRecordCount: number;
   warnings: string[];
 }
@@ -90,10 +102,11 @@ function isUserInputEvent(r: EventLogRecord): boolean {
  * is converted via the shared `convertStep` and its child spans end + export
  * immediately; ENTRY/AGENT are closed at end() carrying turn-level aggregates.
  *
- * Memory decouples from the number of *simultaneously live* spans: at any time
- * only ENTRY/AGENT plus at most one in-flight STEP are open. It is NOT constant
- * per turn — `finalizedStepIds` is O(step count) and `accumMessages` is
- * O(total input size) (see STREAMING_CONVERSION_DESIGN.md §7).
+ * The live span and unfinalized-event working set is bounded by the grace
+ * window, while finalized IDs remain O(step count) and accumulated input
+ * messages remain O(total input size). This avoids retaining every completed
+ * span and avoids the batch converter's retained O(N²) message snapshots; it
+ * does not claim constant total memory for arbitrarily large input content.
  *
  * The caller (e.g. loongsuite-pilot) owns the lifecycle and MUST call push/end
  * serially — the session holds mutable state and is not re-entrant.
@@ -123,6 +136,7 @@ export class TurnStreamSession {
   private readonly userInputEvents: EventLogRecord[] = [];
   private readonly childRecordsByCallId = new Map<string, EventLogRecord[]>();
   private readonly finalizedStepIds = new Set<string>();
+  private readonly finalizedToolCallIds = new Set<string>();
   private readonly seenWarnings = new Set<string>();
   private userHookCount = 0;
 
@@ -139,6 +153,22 @@ export class TurnStreamSession {
     this.passthroughKeys = options?.passthroughKeys;
     this.strict = options?.strict ?? false;
     this.graceSteps = Math.max(0, options?.graceSteps ?? 2);
+
+    if (options?.traceId !== undefined && !isValidTraceId(options.traceId)) {
+      throw new TypeError("TurnStreamOptions.traceId must be a valid lowercase 32-hex trace ID");
+    }
+    if (options?.parentSpanId !== undefined) {
+      if (options.traceId === undefined) {
+        throw new TypeError("TurnStreamOptions.parentSpanId requires TurnStreamOptions.traceId");
+      }
+      if (!isValidSpanId(options.parentSpanId)) {
+        throw new TypeError(
+          "TurnStreamOptions.parentSpanId must be a valid lowercase 16-hex span ID",
+        );
+      }
+    }
+    this._traceId = options?.traceId;
+    this.parentSpanId = options?.parentSpanId;
   }
 
   get traceId(): string | undefined {
@@ -150,9 +180,16 @@ export class TurnStreamSession {
   get open(): boolean {
     return this.started && !this.ended;
   }
-  /** Records currently buffered (not yet finalized) — bounded by the grace window. */
+  /**
+   * Records retained by the session and not yet released. This includes
+   * parent-step, subagent, and user-input records. Parent-step retention is
+   * bounded by the grace window; a single open step can still contain many
+   * records.
+   */
   get pendingRecordCount(): number {
-    return this.parentPending.length;
+    let count = this.parentPending.length + this.userInputEvents.length;
+    for (const records of this.childRecordsByCallId.values()) count += records.length;
+    return count;
   }
 
   push(records: EventLogRecord[]): void {
@@ -164,6 +201,13 @@ export class TurnStreamSession {
 
       const childOf = subagentParentCallId(r);
       if (childOf) {
+        if (this.finalizedToolCallIds.has(childOf)) {
+          this.lateDroppedRecordCount += 1;
+          this.warnOnce(
+            `LATE_SUBAGENT_DROP: dropped record(s) for already-finalized parent tool call ${childOf}`,
+          );
+          continue;
+        }
         const list = this.childRecordsByCallId.get(childOf) ?? [];
         list.push(r);
         this.childRecordsByCallId.set(childOf, list);
@@ -186,6 +230,7 @@ export class TurnStreamSession {
     const mn = minTime(records);
     if (mn > 0) this.earliestMs = Math.min(this.earliestMs, mn);
     this.maxEndMs = Math.max(this.maxEndMs, maxTime(records));
+    this.refreshTurnFields();
 
     if (!this.started && this.parentPending.length > 0) this.start();
     if (!this.started) return; // still only subagent/user-input records seen
@@ -238,6 +283,8 @@ export class TurnStreamSession {
         this.agentInv.totalTokens = usage.totalTokens;
         this.agentInv.usageCacheCreationInputTokens = usage.usageCacheCreationInputTokens;
         this.agentInv.usageCacheReadInputTokens = usage.usageCacheReadInputTokens;
+        this.agentInv.systemInstruction = this.turnSysInstr ?? [];
+        this.agentInv.toolDefinitions = this.turnToolDefs ?? [];
         this.handler.stopInvokeAgent(this.agentInv, endMs);
       }
       if (this.entryInv) {
@@ -245,7 +292,10 @@ export class TurnStreamSession {
         this.handler.stopEntry(this.entryInv, endMs);
       }
     }
+
+    this.dropUnmatchedChildRecords();
     this.ended = true;
+    this.releaseRetainedState();
 
     if (this.strict && this.warnings.length > 0) {
       throw new EventLogConversionError(
@@ -259,9 +309,12 @@ export class TurnStreamSession {
 
   /**
    * Resolve turn-level trace_id / parent_span_id / turn.id from a record,
-   * mirroring groupByTurn: trace_id from any event (first valid wins);
+   * mirroring groupByTurn before ENTRY starts: trace_id from any event (first
+   * valid wins);
    * parent_span_id only from event.name="other" (做法 A upstream marker), never
-   * from llm/tool events (those carry intra-trace parent pointers).
+   * from llm/tool events (those carry intra-trace parent pointers). Once ENTRY
+   * starts, its parent context is immutable and conflicting late context is
+   * ignored with an explicit warning.
    */
   private resolveTurnContext(r: EventLogRecord): void {
     if (this.turnId === undefined) {
@@ -274,13 +327,19 @@ export class TurnStreamSession {
     if (isValidTraceId(traceCand)) {
       if (this._traceId === undefined) this._traceId = traceCand as string;
       else if (this._traceId !== traceCand) {
-        this.warnOnce(
-          `Inconsistent trace_id within turn ${label}: kept ${this._traceId}, saw ${String(traceCand)}`,
-        );
+        if (this.started) {
+          this.warnOnce(
+            `LATE_TRACE_CONTEXT_IGNORED: kept active trace_id ${this._traceId} for turn ${label}, saw ${String(traceCand)}`,
+          );
+        } else {
+          this.warnOnce(
+            `Inconsistent trace_id within turn ${label}: kept ${this._traceId}, saw ${String(traceCand)}`,
+          );
+        }
       }
     } else if (traceCand !== undefined && traceCand !== null && traceCand !== "") {
       this.warnOnce(
-        `Invalid trace_id "${String(traceCand)}" in turn ${label}; SDK will allocate one`,
+        `Invalid trace_id "${String(traceCand)}" in turn ${label}; ignored`,
       );
     }
 
@@ -289,13 +348,19 @@ export class TurnStreamSession {
       if (isValidSpanId(spanCand)) {
         if (this.parentSpanId === undefined) this.parentSpanId = spanCand as string;
         else if (this.parentSpanId !== spanCand) {
-          this.warnOnce(
-            `Inconsistent parent_span_id within turn ${label}: kept ${this.parentSpanId}, saw ${String(spanCand)}`,
-          );
+          if (this.started) {
+            this.warnOnce(
+              `LATE_TRACE_CONTEXT_IGNORED: kept active parent_span_id ${this.parentSpanId} for turn ${label}, saw ${String(spanCand)}`,
+            );
+          } else {
+            this.warnOnce(
+              `Inconsistent parent_span_id within turn ${label}: kept ${this.parentSpanId}, saw ${String(spanCand)}`,
+            );
+          }
         }
       } else if (spanCand !== undefined && spanCand !== null && spanCand !== "") {
         this.warnOnce(
-          `Invalid parent_span_id "${String(spanCand)}" in turn ${label}; ENTRY span will use synthetic parent`,
+          `Invalid parent_span_id "${String(spanCand)}" in turn ${label}; ignored`,
         );
       }
     }
@@ -325,9 +390,6 @@ export class TurnStreamSession {
     if (this._traceId) {
       parentContext = createTraceParentContext(this._traceId, this.parentSpanId);
     }
-
-    this.turnSysInstr = readTurnSystemInstruction(this.parentPending);
-    this.turnToolDefs = readTurnToolDefinitions(this.parentPending);
 
     this.entryInv = buildEntryInvocation(this.parentPending, this.userInputEvents, this.common);
     this.agentInv = buildInvokeAgentInvocation(this.parentPending, this.userInputEvents, this.common);
@@ -361,6 +423,12 @@ export class TurnStreamSession {
       return;
     }
     this.finalizedStepIds.add(stepKey);
+    const toolCallIds = new Set<string>();
+    for (const r of stepRecords) {
+      if (r["event.name"] !== EventName.TOOL_CALL) continue;
+      const id = r["gen_ai.tool.call.id"];
+      if (typeof id === "string" && id.length > 0) toolCallIds.add(id);
+    }
 
     const accumulatedMap = this.buildStepAccumulatedMessages(stepRecords);
 
@@ -376,6 +444,14 @@ export class TurnStreamSession {
       this.strict,
       this.childRecordsByCallId,
     );
+
+    // The child subtree has been converted together with its parent TOOL span.
+    // Release the payload immediately and remember the call ID so child records
+    // arriving beyond the grace window can be dropped observably.
+    for (const callId of toolCallIds) {
+      this.finalizedToolCallIds.add(callId);
+      this.childRecordsByCallId.delete(callId);
+    }
 
     // Fold this step's responses into the running turn-level aggregate.
     for (const r of stepRecords) {
@@ -405,6 +481,41 @@ export class TurnStreamSession {
       map.set(r, full ?? [...this.accumMessages]);
     }
     return map;
+  }
+
+  private refreshTurnFields(): void {
+    const systemInstruction = readTurnSystemInstruction(this.parentPending);
+    if (systemInstruction !== undefined) this.turnSysInstr = systemInstruction;
+    const toolDefinitions = readTurnToolDefinitions(this.parentPending);
+    if (toolDefinitions !== undefined) this.turnToolDefs = toolDefinitions;
+  }
+
+  private dropUnmatchedChildRecords(): void {
+    for (const [callId, records] of this.childRecordsByCallId) {
+      if (records.length === 0) continue;
+      this.lateDroppedRecordCount += records.length;
+      this.warnOnce(
+        `UNMATCHED_SUBAGENT_DROP: dropped ${records.length} record(s) without a finalized parent tool call ${callId}`,
+      );
+    }
+    this.childRecordsByCallId.clear();
+  }
+
+  private releaseRetainedState(): void {
+    this.parentPending.length = 0;
+    this.userInputEvents.length = 0;
+    this.childRecordsByCallId.clear();
+    this.finalizedStepIds.clear();
+    this.finalizedToolCallIds.clear();
+    this.accumMessages.length = 0;
+    this.entryInv = null;
+    this.agentInv = null;
+    this.agentCtx = undefined;
+    this.common = null;
+    this.lastResponseRecord = null;
+    this.turnSysInstr = [];
+    this.turnToolDefs = [];
+    this.seenWarnings.clear();
   }
 
   private result(): TurnStreamResult {

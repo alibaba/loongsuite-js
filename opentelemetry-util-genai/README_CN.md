@@ -284,12 +284,20 @@ convertEventLogToTrace(records, {
 对于**超长 turn**(数千轮 ReAct)这可能耗尽内存。`createTurnStreamSession` 对单个 turn
 **增量转换**:首次 `push` 时创建并保持 ENTRY/AGENT 打开,每个完整的 STEP 在 finalize 时
 转换并导出(随即释放)其子 span,`end()` 时才关闭 ENTRY/AGENT 并写入 turn 级聚合。
-内存与 turn 的 step 数无关、保持有界。
+活跃 span 与未 finalize 事件的工作集受 grace 窗口限制;已 finalize ID 仍为
+O(step 数),累计输入消息仍为 O(输入总量)。流式转换避免保留所有已完成 span 和批处理
+路径驻留的 O(N²) 消息快照,但不承诺任意输入内容下总内存恒定。
 
 ```ts
 import { createTurnStreamSession } from "@loongsuite/otel-util-genai";
 
-const session = createTurnStreamSession({ handler, passthroughKeys });
+const session = createTurnStreamSession({
+  handler,
+  passthroughKeys,
+  // 可选;一旦提供即作为权威上下文:
+  traceId,
+  parentSpanId,
+});
 session.push(batch1); // 增量喂入(如每次轮询一批);完整的 step 此刻即转换
 session.push(batch2);
 const result = session.end(); // 关闭 ENTRY/AGENT,flush 最后的 step
@@ -300,13 +308,21 @@ if (result.lateDroppedRecordCount > 0) raiseAlarm(result.warnings);
 
 - **一个 session 对应一个 turn**;`push`/`end` 必须串行调用(会话持有可变状态)。对于
   边界明确、已完整的 turn,批处理 `convertEventLogToTrace` 仍是合适选择。
+- **trace context 必须在 ENTRY 创建前确定**。可选的 `traceId` / `parentSpanId`
+  构造参数一旦提供即为权威值。不传时使用首次父记录触发 ENTRY 之前观察到的第一个有效
+  event context;若仍不存在则由 SDK 分配 trace ID。ENTRY 创建后到达的 context 无法
+  重新挂接已有 span,并产生 `LATE_TRACE_CONTEXT_IGNORED`。`parentSpanId` 必须与
+  `traceId` 一起传入。
 - **`graceSteps`(默认 2)**——look-back 窗口:一个 step 只有在其后又出现 `graceSteps`
   个新 `gen_ai.step.id` 时(或 `end()` 时)才被 finalize,以容忍上游有限的乱序发射
   (例如某 step 的尾部 `tool.result` 与下一 step 落在同一毫秒)。到达已 finalize step 的
   记录会被丢弃、计入 `lateDroppedRecordCount` 并产生 `LATE_STEP_DROP` 警告——上游的顺序
   约定见 `EVENT_LOG_TO_TRACE_SPEC.md` §2.5。
-- **`session.pendingRecordCount`**——当前缓冲(未 finalize)的记录数,受 grace 窗口约束,
-  可用于监控驻留。
+- subagent 记录在父 TOOL finalize 后立即释放。之后到达的 child 以
+  `LATE_SUBAGENT_DROP` 丢弃;到 `end()` 仍找不到父 TOOL 的 child 以
+  `UNMATCHED_SUBAGENT_DROP` 丢弃。
+- **`session.pendingRecordCount`**——session 当前持有的全部父 step、subagent 和用户输入
+  记录数。父 step 驻留受 grace 窗口控制,但单个未结束 step 仍可能包含大量记录。
 - 批处理 `convertEventLogToTrace` 未改动,且与流式共用底层转换,两条路径产出等价的 span。
 
 ## 许可证

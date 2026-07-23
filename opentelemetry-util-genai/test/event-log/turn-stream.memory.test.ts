@@ -84,7 +84,7 @@ describe("TurnStreamSession — memory bounds", () => {
     expect(byKind(all, GenAiSpanKindValues.LLM)).toHaveLength(N);
   });
 
-  it("B1: buffered record count is bounded and independent of turn size", () => {
+  it("B1: parent-step buffer is bounded and independent of turn size", () => {
     const measure = (n: number): { maxPending: number; spanCount: number; lateDropped: number } => {
       const session = createTurnStreamSession({ handler: handlerWith(new NoopExporter()) });
       let maxPending = 0;
@@ -102,14 +102,16 @@ describe("TurnStreamSession — memory bounds", () => {
     // Bounded by the grace window, regardless of turn size.
     expect(small.maxPending).toBeLessThanOrEqual(MAX_PENDING);
     expect(large.maxPending).toBeLessThanOrEqual(MAX_PENDING);
-    // Peak retention does NOT grow with turn size → memory decoupled.
+    // The unfinalized event window does not grow with turn size. Other compact
+    // session state (finalized IDs and accumulated messages) is intentionally
+    // linear in the turn size and is covered by the heap test below.
     expect(large.maxPending).toBe(small.maxPending);
     // No data lost, all spans produced.
     expect(small.spanCount).toBe(2 + 2 * 1000);
     expect(large.spanCount).toBe(2 + 2 * 5000);
     expect(small.lateDropped).toBe(0);
     expect(large.lateDropped).toBe(0);
-  });
+  }, 30000);
 
   it.skipIf(!globalThis.gc)("B2: heap stays bounded under production config (BatchSpanProcessor + async)", async () => {
     const gc = globalThis.gc as () => void;

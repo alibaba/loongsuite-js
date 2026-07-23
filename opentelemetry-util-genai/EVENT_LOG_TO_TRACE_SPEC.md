@@ -122,6 +122,18 @@ step_3:  LLM(最终回答, 无工具)
 
 > 与 §7 的关系：§7 已要求 `messages_delta` 在 turn 内**单调追加、不能乱序**（内容累积需要顺序）；本条是更一般的 step 级顺序建议，服务于流式消费方的增量 finalize。
 
+### 2.6 [MUST 若面向流式消费] ENTRY 创建前确定 trace context
+
+OpenTelemetry span 创建后不能更换 trace 或父 span。流式消费方在首次父记录触发
+ENTRY 创建之前，必须已经获得该 turn 的 `trace_id` 以及可选的 `parent_span_id`。
+
+- `TurnStreamSession` 可通过构造参数 `traceId` / `parentSpanId` 显式接收权威上下文；
+  `parentSpanId` 必须与 `traceId` 一起提供。
+- 不显式提供时，使用 ENTRY 创建前从 event record 中观察到的第一个有效上下文；
+  若仍没有有效 `trace_id`，由 OpenTelemetry SDK 分配新 trace ID。
+- ENTRY 创建后才到达的不同 trace context 无法重新挂接已有 span，将被忽略并产生
+  `LATE_TRACE_CONTEXT_IGNORED` 告警。
+
 ---
 
 ## 3. 字段映射总表
