@@ -14,6 +14,12 @@
 
 export { convertEventLogToTrace } from "./converter.js";
 export {
+  TurnStreamSession,
+  createTurnStreamSession,
+  type TurnStreamOptions,
+  type TurnStreamResult,
+} from "./turn-stream.js";
+export {
   convertEventLogToReadableSpans,
   type ReadableSpansResult,
 } from "./readable-spans.js";
