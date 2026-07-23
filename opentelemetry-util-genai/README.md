@@ -292,8 +292,8 @@ Skill-related operations reuse existing TOOL spans and are represented by
 `gen_ai.skill.name`, `gen_ai.skill.id`, `gen_ai.skill.version`, and
 `gen_ai.skill.description`; no new Skill span is created. Event-log conversion
 detects first-class Skill tools by default and recognizes reads, resource
-access, and script execution from `skills/<name>/...` paths in tool-call
-arguments.
+access, and script execution from `skills/<name>` paths (including their
+descendants) in tool-call arguments.
 
 ```ts
 convertEventLogToTrace(records, {

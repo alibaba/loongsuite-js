@@ -283,8 +283,8 @@ convertEventLogToTrace(records, {
 Skill 相关操作复用现有 TOOL span，通过 `gen_ai.skill.name` /
 `gen_ai.skill.id` / `gen_ai.skill.version` / `gen_ai.skill.description`
 表达，不新增 Skill span。Event Log 转换默认识别一等公民 Skill 工具，并从
-tool-call arguments 的 `skills/<name>/...` 路径识别读取定义、访问资源和执行
-脚本等 Skill 相关操作。
+tool-call arguments 的 `skills/<name>` 路径及其子路径识别读取定义、访问资源
+和执行脚本等 Skill 相关操作。
 
 ```ts
 convertEventLogToTrace(records, {

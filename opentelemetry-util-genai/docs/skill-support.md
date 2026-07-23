@@ -111,8 +111,11 @@ execute_tool Skill
 默认从 `gen_ai.tool.call.arguments` 的字符串字段递归查找以下路径：
 
 ```text
+.../skills/<name>
 .../skills/<name>/...
+.../skills-<variant>/<name>
 .../skills-<variant>/<name>/...
+.../skills/.system/<name>
 .../skills/.system/<name>/...
 ```
 
@@ -121,12 +124,14 @@ execute_tool Skill
 | TOOL | 参数中的路径 | Skill |
 |---|---|---|
 | `Read` | `~/.codex/skills/hatch-pet/SKILL.md` | `hatch-pet` |
+| `Shell` | `cwd=~/.cursor/skills/bmi-calculator` | `bmi-calculator` |
 | `exec` | `node ~/.codex/skills/hatch-pet/scripts/build.js` | `hatch-pet` |
 | `Shell` | `python ~/.cursor/skills/bmi-calculator/scripts/x.py` | `bmi-calculator` |
 | `Read` | `~/.cursor/skills-cursor/create-hook/SKILL.md` | `create-hook` |
 | `exec` | `~/.codex/skills/.system/imagegen/SKILL.md` | `imagegen` |
 
-检测要求 `skills` 是独立路径段，且后面存在具名子目录。因此：
+检测要求 `skills` 是独立路径段，且后面存在 Skill 名称。路径可以结束在 Skill
+根目录，也可以继续指向其文件或子目录。因此：
 
 ```text
 /tmp/hatch-pet-users-codex-skills-3/out  // 不匹配

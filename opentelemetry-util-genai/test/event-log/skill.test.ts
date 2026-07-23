@@ -175,6 +175,32 @@ describe("resolveSkill", () => {
     });
   });
 
+  it.each([
+    [
+      { cwd: "/Users/u/.cursor/skills/bmi-calculator" },
+      "bmi-calculator",
+    ],
+    [
+      { file_path: "/Users/u/.cursor/skills/bmi-calculator" },
+      "bmi-calculator",
+    ],
+    [
+      {
+        command:
+          'cd "/Users/u/.cursor/skills/bmi-calculator" && python3 scripts/run.py',
+      },
+      "bmi-calculator",
+    ],
+  ])(
+    "detects a Skill path that ends at the Skill root: %j",
+    (args, expected) => {
+      expect(resolveSkill(call("exec", args))).toEqual({
+        name: expected,
+        id: expected,
+      });
+    },
+  );
+
   it("does not match noisy directory names or paths found only in tool output", () => {
     expect(
       resolveSkill(

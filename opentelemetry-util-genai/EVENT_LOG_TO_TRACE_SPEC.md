@@ -207,8 +207,8 @@ TOOL span 上写入 `gen_ai.skill.*`。相关操作包括一等公民 Skill 工�
 3. 调用方自定义 detector
 4. 一等公民工具名（`Skill` / `load_skill` / `read_skill` /
    `skill_view` / `skill_manage`）
-5. call arguments 中 `skills/<name>/...`、`skills-*/<name>/...`、
-   `skills/.system/<name>/...` 路径
+5. call arguments 中 `skills/<name>`、`skills-*/<name>`、
+   `skills/.system/<name>` 路径及其子路径
 6. 有 name 无 id 时回退 `id = name`
 
 路径启发式只扫描 tool-call arguments，不扫描普通 result/stdout/文件内容。
