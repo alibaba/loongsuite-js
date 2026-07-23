@@ -17,6 +17,10 @@ export const GEN_AI_EMBEDDINGS_DIMENSION_COUNT =
   "gen_ai.embeddings.dimension.count";
 export const GEN_AI_TOOL_CALL_ARGUMENTS = "gen_ai.tool.call.arguments";
 export const GEN_AI_TOOL_CALL_RESULT = "gen_ai.tool.call.result";
+export const GEN_AI_SKILL_ID = "gen_ai.skill.id";
+export const GEN_AI_SKILL_NAME = "gen_ai.skill.name";
+export const GEN_AI_SKILL_VERSION = "gen_ai.skill.version";
+export const GEN_AI_SKILL_DESCRIPTION = "gen_ai.skill.description";
 export const GEN_AI_RETRIEVAL_QUERY_TEXT = "gen_ai.retrieval.query.text";
 export const GEN_AI_RETRIEVAL_DOCUMENTS = "gen_ai.retrieval.documents";
 export const GEN_AI_RERANK_DOCUMENTS_COUNT = "gen_ai.rerank.documents.count";

@@ -62,6 +62,10 @@ import {
   GEN_AI_TOOL_TYPE,
   GEN_AI_TOOL_CALL_ARGUMENTS,
   GEN_AI_TOOL_CALL_RESULT,
+  GEN_AI_SKILL_ID,
+  GEN_AI_SKILL_NAME,
+  GEN_AI_SKILL_VERSION,
+  GEN_AI_SKILL_DESCRIPTION,
   GEN_AI_EMBEDDINGS_DIMENSION_COUNT,
   GEN_AI_RETRIEVAL_QUERY_TEXT,
   GEN_AI_RETRIEVAL_DOCUMENTS,
@@ -238,6 +242,18 @@ export function applyExecuteToolFinishAttributes(
   }
   if (invocation.toolType != null) {
     attrs[GEN_AI_TOOL_TYPE] = invocation.toolType;
+  }
+  if (invocation.skillId != null) {
+    attrs[GEN_AI_SKILL_ID] = invocation.skillId;
+  }
+  if (invocation.skillName != null) {
+    attrs[GEN_AI_SKILL_NAME] = invocation.skillName;
+  }
+  if (invocation.skillVersion != null) {
+    attrs[GEN_AI_SKILL_VERSION] = invocation.skillVersion;
+  }
+  if (invocation.skillDescription != null) {
+    attrs[GEN_AI_SKILL_DESCRIPTION] = invocation.skillDescription;
   }
 
   Object.assign(

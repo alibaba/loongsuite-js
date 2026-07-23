@@ -16,9 +16,12 @@
 ## 0. 一句话核心
 
 > **事件日志是"中间表示"。trace 不是插件直接写的，而是由 util-genai 从事件日志确定性地推导出来的。**
-> 因此：**trace 长什么样，完全由事件日志的字段决定。事件日志错了，trace 一定错——且转换器不会、也不应该去"猜"或"补救"。**
+> 因此：**trace 的结构完全由事件日志的分组字段决定。事件日志错了，trace 结构一定错。**
 
-转换器只做一件事：**按事件日志里携带的分组键（trace_id / turn.id / step.id / tool.call.id / response.id）把扁平事件流重组成 span 树**。它不访问任何外部数据源，不做业务推断。所以上游必须把这些键写正确。
+转换器按事件日志里携带的分组键（trace_id / turn.id / step.id /
+tool.call.id / response.id）把扁平事件流重组成 span 树。它不访问任何外部
+数据源，也不会推断分组关系。唯一的业务语义启发式是可关闭的 Skill 属性识别
+（见 §3.3.1）；该识别只给既有 TOOL span 补属性，不改变 span 树结构。
 
 ---
 
@@ -186,6 +189,33 @@ ENTRY 创建之前，必须已经获得该 turn 的 `trace_id` 以及可选的 `
 | `gen_ai.tool.type` | call | `gen_ai.tool.type`（默认 `function`）| [MAY] |
 | `gen_ai.tool.call.arguments` | call | `gen_ai.tool.call.arguments` | [SHOULD] |
 | `gen_ai.tool.call.result` | result | `gen_ai.tool.call.result` | [SHOULD] |
+| `gen_ai.skill.name` | call/result | `gen_ai.skill.name` | Conditionally Required：识别为 Skill 相关操作时 |
+| `gen_ai.skill.id` | call/result | `gen_ai.skill.id` | Conditionally Required：识别为 Skill 相关操作时 |
+| `gen_ai.skill.version` | call/result | `gen_ai.skill.version` | [MAY] |
+| `gen_ai.skill.description` | call/result | `gen_ai.skill.description` | [MAY] |
+
+#### 3.3.1 Skill 属性自动识别
+
+Skill 不产生新 span；当某个工具执行能够确定与 Skill 相关时，转换器在对应
+TOOL span 上写入 `gen_ai.skill.*`。相关操作包括一等公民 Skill 工具调用、
+读取 Skill 定义/资源，以及执行 Skill 目录脚本。
+
+识别默认开启，优先级按字段独立合并：
+
+1. result 显式 `gen_ai.skill.*`
+2. call 显式 `gen_ai.skill.*`
+3. 调用方自定义 detector
+4. 一等公民工具名（`Skill` / `load_skill` / `read_skill` /
+   `skill_view` / `skill_manage`）
+5. call arguments 中 `skills/<name>/...`、`skills-*/<name>/...`、
+   `skills/.system/<name>/...` 路径
+6. 有 name 无 id 时回退 `id = name`
+
+路径启发式只扫描 tool-call arguments，不扫描普通 result/stdout/文件内容。
+`skillDetection:false` 可关闭所有推断，但不会丢弃上游显式提供的字段。
+
+一个 Skill 可能对应多个 Skill 相关 TOOL span；这些 span **不代表 Skill
+调用次数**。完整配置和示例见 `docs/skill-support.md`。
 
 ### 3.4 AGENT span（转换器自动聚合，无需上游写事件）
 
@@ -634,7 +664,10 @@ import('@loongsuite/otel-util-genai').then(async ({ convertEventLogToReadableSpa
 - ✅ **（0.1.0-beta.2+）自动合并**同一 step 内带相同 `response.id` 的多条 `llm.response`（parts 拼接、token 取有值的那条）。但如果 `response.id` 不同或缺失，仍会生成多个独立 LLM span。源头合并仍是最佳实践。
 - ❌ 不修正错误的 turn.id / step.id 切分 —— 上游切错，trace 就错。
 - ❌ 不去重 pilot 的重复转换。
-- ❌ 不处理 `skill.use` / `tool.approve`（忽略）。`other` 仅提取 `input.messages` 归并到 ENTRY，不生成 span（见 §5.1）。
+- ❌ 不把独立的 `skill.use` 事件关联为 TOOL span；Skill 属性通过
+  `tool.call`/`tool.result` 显式字段或 §3.3.1 的可关闭启发式识别。
+  `tool.approve` 仍忽略。`other` 仅提取 `input.messages` 归并到 ENTRY，
+  不生成 span（见 §5.1）。
 
 **一切 trace 质量问题，先查事件日志是否符合本规范。**
 

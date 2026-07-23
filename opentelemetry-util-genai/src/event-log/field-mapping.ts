@@ -30,7 +30,13 @@ import {
   type OutputMessage,
   type ToolDefinition,
 } from "../types.js";
-import { EventName, type EventLogRecord, type LlmPair } from "./types.js";
+import {
+  EventName,
+  type EventLogRecord,
+  type LlmPair,
+  type SkillDetectionConfig,
+} from "./types.js";
+import { resolveSkill } from "./skill.js";
 
 /* -------------------------- primitive accessors -------------------------- */
 
@@ -93,6 +99,8 @@ export interface TurnCommon {
   passthroughKeys?: string[];
   /** Turn-level pass-through values, resolved once from all turn records. */
   passthroughTurn?: Record<string, unknown>;
+  /** Skill detection configuration shared by batch, stream and subagents. */
+  skillDetection?: SkillDetectionConfig;
 }
 
 /**
@@ -640,12 +648,21 @@ export function buildExecuteToolInvocation(
   const source = pair.call ?? pair.result ?? {};
   const toolName = asString(source["gen_ai.tool.name"]) ?? "unknown";
   const passthrough = mergePassthrough(common, pair.call, pair.result);
+  const skill = resolveSkill(
+    pair.call,
+    pair.result,
+    common?.skillDetection,
+  );
   return createExecuteToolInvocation(toolName, {
     toolCallId: asString(source["gen_ai.tool.call.id"]) ?? null,
     toolType: asString(source["gen_ai.tool.type"]) ?? "function",
     toolDescription: asString(source["gen_ai.tool.description"]) ?? null,
     toolCallArguments: pair.call?.["gen_ai.tool.call.arguments"] ?? null,
     toolCallResult: pair.result?.["gen_ai.tool.call.result"] ?? null,
+    skillName: skill?.name ?? null,
+    skillId: skill?.id ?? null,
+    skillVersion: skill?.version ?? null,
+    skillDescription: skill?.description ?? null,
     agentName: common?.agentName ?? null,
     userId: common?.userId ?? null,
     sessionId: common?.sessionId ?? null,

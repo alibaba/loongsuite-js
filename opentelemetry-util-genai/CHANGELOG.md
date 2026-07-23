@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.0-beta.13 (2026-07-23)
+
+### Features
+
+- **GenAI Skill 属性支持**：`ExecuteToolInvocation` 新增
+  `skillName` / `skillId` / `skillVersion` / `skillDescription`，并在
+  `execute_tool` span 写入对应 `gen_ai.skill.*` 属性。
+- **Event Log Skill 自动识别**：批处理和流式转换默认识别 `Skill` /
+  `load_skill` / `read_skill` / `skill_view` / `skill_manage` 等一等公民工具，
+  并从 tool-call arguments 的 `skills/<name>/...` 路径识别读取定义、访问
+  Skill 资源与执行脚本等操作。
+- 新增 `ConvertOptions.skillDetection` / `TurnStreamOptions.skillDetection`，
+  支持关闭推断、自定义工具名、关闭路径启发式和同步自定义 detector。
+- 显式 `gen_ai.skill.*` 始终优先且在关闭推断时仍保留；配置同时覆盖 batch、
+  streaming 和嵌套 Subagent。
+
+### Documentation
+
+- 新增 `docs/skill-support.md`，说明 Skill 语义、识别范围、优先级、配置、
+  示例与边界。
+
 ## 0.1.0-beta.12 (2026-07-23)
 
 ### Bug Fixes

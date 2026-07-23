@@ -36,6 +36,44 @@ export const EventName = {
 
 export type EventNameValue = (typeof EventName)[keyof typeof EventName];
 
+/** Skill metadata attached to an execute_tool span. */
+export interface SkillInfo {
+  name?: string;
+  id?: string;
+  version?: string;
+  description?: string;
+}
+
+/** Configuration for best-effort Skill detection on TOOL records. */
+export interface SkillDetectionOptions {
+  /**
+   * First-class Skill tool names. Matching is case-insensitive.
+   *
+   * Supplying this option replaces the defaults. An empty array disables
+   * first-class tool-name detection without disabling explicit attributes.
+   */
+  toolNames?: string[];
+  /**
+   * Detect Skill-related operations from paths in tool-call arguments.
+   * Defaults to true. Tool results/stdout are deliberately not path-scanned.
+   */
+  pathHeuristic?: boolean;
+  /**
+   * Optional synchronous custom detector. Its non-empty fields take
+   * precedence over built-in tool-name and path detection, while explicit
+   * gen_ai.skill.* record fields remain authoritative.
+   *
+   * Exceptions are propagated to the caller as configuration/programming
+   * errors.
+   */
+  detect?: (
+    call?: EventLogRecord,
+    result?: EventLogRecord,
+  ) => SkillInfo | undefined;
+}
+
+export type SkillDetectionConfig = boolean | SkillDetectionOptions;
+
 /** Options accepted by convertEventLogToTrace. */
 export interface ConvertOptions {
   /**
@@ -66,6 +104,14 @@ export interface ConvertOptions {
    * Omit or leave empty to disable (behavior unchanged).
    */
   passthroughKeys?: string[];
+  /**
+   * Best-effort Skill detection for execute_tool spans.
+   *
+   * undefined/true enables the default first-class tool-name detector and
+   * aggressive path heuristic. false disables inference but still preserves
+   * explicit gen_ai.skill.* fields from the event log.
+   */
+  skillDetection?: SkillDetectionConfig;
 }
 
 /** Result of a conversion. */
