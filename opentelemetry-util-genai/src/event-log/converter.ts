@@ -25,6 +25,7 @@ import {
   type StepGroup,
   type ToolPair,
   type TurnGroup,
+  type SkillDetectionConfig,
 } from "./types.js";
 import { createTraceParentContext, isValidTraceId } from "./parent-context.js";
 import {
@@ -84,7 +85,14 @@ export function convertEventLogToTrace(
   const turns = groupByTurn(records, warnings);
 
   for (const turn of turns) {
-    const turnSpanCount = convertTurn(turn, handler, warnings, strict, options?.passthroughKeys);
+    const turnSpanCount = convertTurn(
+      turn,
+      handler,
+      warnings,
+      strict,
+      options?.passthroughKeys,
+      options?.skillDetection,
+    );
     spanCount += turnSpanCount;
     if (turn.traceId) {
       traceIds.push(turn.traceId);
@@ -106,6 +114,7 @@ function convertTurn(
   warnings: string[],
   strict: boolean,
   passthroughKeys?: string[],
+  skillDetection?: SkillDetectionConfig,
 ): number {
   const allRecords = turn.records;
   if (allRecords.length === 0) return 0;
@@ -181,6 +190,7 @@ function convertTurn(
     userId: resolveTurnUserId(parentRecords, allUserInputEvents) ?? null,
     sessionId: resolveTurnSessionId(parentRecords, allUserInputEvents) ?? null,
     passthroughKeys,
+    skillDetection,
     passthroughTurn: collectPassthrough(
       passthroughKeys,
       ...parentRecords,
@@ -382,6 +392,7 @@ function convertToolPair(
       userId: common.userId,
       sessionId: common.sessionId,
       passthroughKeys: common.passthroughKeys,
+      skillDetection: common.skillDetection,
       passthroughTurn: collectPassthrough(common.passthroughKeys, ...childRecords),
     };
     const childAgentInv = buildInvokeAgentInvocation(childRecords, [], childCommon);

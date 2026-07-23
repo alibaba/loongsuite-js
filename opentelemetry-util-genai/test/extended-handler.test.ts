@@ -16,6 +16,12 @@ import {
 } from "../src/extended-types.js";
 import { createMemoryInvocation } from "../src/memory/memory-types.js";
 import type { GenAIError } from "../src/types.js";
+import {
+  GEN_AI_SKILL_DESCRIPTION,
+  GEN_AI_SKILL_ID,
+  GEN_AI_SKILL_NAME,
+  GEN_AI_SKILL_VERSION,
+} from "../src/semconv/gen-ai-extended-attributes.js";
 
 function createMocks() {
   const endFn = vi.fn();
@@ -138,6 +144,26 @@ describe("ExtendedTelemetryHandler", () => {
       handler.startExecuteTool(inv);
       handler.failExecuteTool(inv, error);
       expect(mocks.setStatusFn).toHaveBeenCalled();
+    });
+
+    it("writes explicit Skill metadata on the TOOL span", () => {
+      const inv = createExecuteToolInvocation("Skill", {
+        skillName: "code-review",
+        skillId: "skill-29bbe8a7",
+        skillVersion: "1.2.3",
+        skillDescription: "Review repository changes",
+      });
+      handler.startExecuteTool(inv);
+      handler.stopExecuteTool(inv);
+
+      expect(mocks.setAttributesFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          [GEN_AI_SKILL_NAME]: "code-review",
+          [GEN_AI_SKILL_ID]: "skill-29bbe8a7",
+          [GEN_AI_SKILL_VERSION]: "1.2.3",
+          [GEN_AI_SKILL_DESCRIPTION]: "Review repository changes",
+        }),
+      );
     });
   });
 

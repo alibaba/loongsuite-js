@@ -66,6 +66,10 @@ export interface ExecuteToolInvocation {
   toolType?: string | null;
   toolCallArguments?: unknown;
   toolCallResult?: unknown;
+  skillId?: string | null;
+  skillName?: string | null;
+  skillVersion?: string | null;
+  skillDescription?: string | null;
   monotonicStartS?: number | null;
   // ARMS GenAI common attributes (apply to all spans). All optional.
   agentName?: string | null;

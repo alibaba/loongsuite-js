@@ -30,5 +30,12 @@ export {
   type EventNameValue,
   type ConvertOptions,
   type ConvertResult,
+  type SkillInfo,
+  type SkillDetectionOptions,
+  type SkillDetectionConfig,
 } from "./types.js";
+export {
+  DEFAULT_SKILL_TOOL_NAMES,
+  resolveSkill,
+} from "./skill.js";
 export { isValidTraceId, isValidSpanId, createTraceParentContext } from "./parent-context.js";

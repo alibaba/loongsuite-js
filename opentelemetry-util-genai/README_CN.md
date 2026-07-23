@@ -278,6 +278,28 @@ convertEventLogToTrace(records, {
   `gen_ai.input.messages` 这类大字段。
 - 不传 `passthroughKeys` 时行为完全不变。
 
+### Skill 属性与自动识别
+
+Skill 相关操作复用现有 TOOL span，通过 `gen_ai.skill.name` /
+`gen_ai.skill.id` / `gen_ai.skill.version` / `gen_ai.skill.description`
+表达，不新增 Skill span。Event Log 转换默认识别一等公民 Skill 工具，并从
+tool-call arguments 的 `skills/<name>` 路径及其子路径识别读取定义、访问资源
+和执行脚本等 Skill 相关操作。
+
+```ts
+convertEventLogToTrace(records, {
+  handler,
+  skillDetection: {
+    toolNames: ["Skill", "load_skill", "read_skill"],
+    pathHeuristic: true,
+  },
+});
+```
+
+设置 `skillDetection:false` 可关闭推断，但显式 `gen_ai.skill.*` 仍会保留。
+完整的识别范围、优先级、配置和实际示例见
+[`docs/skill-support.md`](docs/skill-support.md)。
+
 ### 流式转换(`createTurnStreamSession`)
 
 `convertEventLogToTrace` 一次性转换整个 turn——必须把该 turn 的全部记录持有在内存中。

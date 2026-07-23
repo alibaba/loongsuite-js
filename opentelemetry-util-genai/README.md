@@ -286,6 +286,30 @@ convertEventLogToTrace(records, {
   avoid large payload fields such as `gen_ai.input.messages`.
 - Omit `passthroughKeys` to keep behavior unchanged.
 
+### Skill attributes and automatic detection
+
+Skill-related operations reuse existing TOOL spans and are represented by
+`gen_ai.skill.name`, `gen_ai.skill.id`, `gen_ai.skill.version`, and
+`gen_ai.skill.description`; no new Skill span is created. Event-log conversion
+detects first-class Skill tools by default and recognizes reads, resource
+access, and script execution from `skills/<name>` paths (including their
+descendants) in tool-call arguments.
+
+```ts
+convertEventLogToTrace(records, {
+  handler,
+  skillDetection: {
+    toolNames: ["Skill", "load_skill", "read_skill"],
+    pathHeuristic: true,
+  },
+});
+```
+
+Set `skillDetection: false` to disable inference; explicit
+`gen_ai.skill.*` fields are still preserved. See
+[`docs/skill-support.md`](docs/skill-support.md) for precedence, configuration,
+boundaries, and examples.
+
 ### Streaming conversion (`createTurnStreamSession`)
 
 `convertEventLogToTrace` converts a whole turn at once — it must hold every

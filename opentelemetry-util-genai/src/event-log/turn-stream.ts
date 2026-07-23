@@ -19,7 +19,12 @@ import {
 } from "../extended-handler.js";
 import type { InputMessage } from "../types.js";
 import type { EntryInvocation, InvokeAgentInvocation } from "../extended-types.js";
-import { EventLogConversionError, EventName, type EventLogRecord } from "./types.js";
+import {
+  EventLogConversionError,
+  EventName,
+  type EventLogRecord,
+  type SkillDetectionConfig,
+} from "./types.js";
 import { convertStep, minTime, maxTime } from "./converter.js";
 import { groupByStep, isUserHookCandidate } from "./grouping.js";
 import { createTraceParentContext, isValidSpanId, isValidTraceId } from "./parent-context.js";
@@ -44,6 +49,11 @@ import {
 export interface TurnStreamOptions {
   handler?: ExtendedTelemetryHandler;
   passthroughKeys?: string[];
+  /**
+   * Best-effort Skill detection. Semantics match ConvertOptions.skillDetection.
+   * Defaults to enabled; false preserves explicit gen_ai.skill.* only.
+   */
+  skillDetection?: SkillDetectionConfig;
   /**
    * Authoritative trace ID for the turn. When omitted, the first valid
    * `trace_id` observed before ENTRY starts is used; if none is available,
@@ -116,6 +126,7 @@ export class TurnStreamSession {
 
   private readonly handler: ExtendedTelemetryHandler;
   private readonly passthroughKeys?: string[];
+  private readonly skillDetection?: SkillDetectionConfig;
   private readonly strict: boolean;
   private readonly graceSteps: number;
   private lateDroppedRecordCount = 0;
@@ -151,6 +162,7 @@ export class TurnStreamSession {
   constructor(options?: TurnStreamOptions) {
     this.handler = options?.handler ?? getExtendedTelemetryHandler();
     this.passthroughKeys = options?.passthroughKeys;
+    this.skillDetection = options?.skillDetection;
     this.strict = options?.strict ?? false;
     this.graceSteps = Math.max(0, options?.graceSteps ?? 2);
 
@@ -379,6 +391,7 @@ export class TurnStreamSession {
       userId: resolveTurnUserId(this.parentPending, this.userInputEvents) ?? null,
       sessionId: resolveTurnSessionId(this.parentPending, this.userInputEvents) ?? null,
       passthroughKeys: this.passthroughKeys,
+      skillDetection: this.skillDetection,
       passthroughTurn: collectPassthrough(
         this.passthroughKeys,
         ...this.parentPending,
