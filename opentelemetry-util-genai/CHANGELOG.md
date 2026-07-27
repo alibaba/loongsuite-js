@@ -1,6 +1,9 @@
 # Changelog
 
-## 0.1.0-beta.14 (2026-07-27)
+## 0.1.0 (2026-07-27)
+
+首个 npm 正式稳定版本，包含 `0.1.0-beta.0` 至 `0.1.0-beta.13`
+期间完成的能力与修复，以及以下多模态增强。
 
 ### Features
 
@@ -17,7 +20,7 @@
   `gen_ai.system_instructions` 时转换为 Schema 要求的 `mime_type` /
   `file_id`。
 - **Instrumentation scope 版本一致性**：默认 `otel.scope.version` 与 npm
-  包版本统一为 `0.1.0-beta.14`。
+  包版本统一为 `0.1.0`。
 
 ## 0.1.0-beta.13 (2026-07-23)
 
@@ -173,7 +176,9 @@ All new fields are optional — plugins ignoring them stay fully backward compat
 - Event log → OTel span tree converter (`convertEventLogToTrace` / `convertEventLogToReadableSpans`).
 - user-hook events auto-merge into ENTRY span input.messages.
 
-## 0.1.0 (2026-04-14)
+## Pre-release baseline (2026-04-14)
+
+> 源码初始实现里程碑；未以正式 `0.1.0` 发布到 npm。
 
 ### Features
 

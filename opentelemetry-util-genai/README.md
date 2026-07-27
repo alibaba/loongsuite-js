@@ -7,7 +7,7 @@ This is the Node.js equivalent of the Python `opentelemetry-util-genai` package,
 ## Installation
 
 ```bash
-npm install @loongsuite/otel-util-genai@0.1.0-beta.14
+npm install @loongsuite/otel-util-genai@0.1.0
 ```
 
 ## Features
