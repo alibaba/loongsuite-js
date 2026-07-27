@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.0-beta.14 (2026-07-27)
+
+### Features
+
+- **多模态 URI 元数据自动采集**：启用实验语义规范并将消息内容采集到
+  Span 时，自动从 LLM 输入和输出消息的 `Uri` Part 汇总
+  `gen_ai.input.multimodal_metadata` /
+  `gen_ai.output.multimodal_metadata`；行为与 Python util 保持一致，仅汇总
+  URI，不包含 Blob、Base64Blob 或 File。
+
+### Bug Fixes
+
+- **多模态消息字段规范化**：TypeScript 公共 API 继续使用 `mimeType` /
+  `fileId`，写入 `gen_ai.input.messages`、`gen_ai.output.messages` 和
+  `gen_ai.system_instructions` 时转换为 Schema 要求的 `mime_type` /
+  `file_id`。
+- **Instrumentation scope 版本一致性**：默认 `otel.scope.version` 与 npm
+  包版本统一为 `0.1.0-beta.14`。
+
 ## 0.1.0-beta.13 (2026-07-23)
 
 ### Features

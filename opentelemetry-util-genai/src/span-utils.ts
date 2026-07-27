@@ -52,6 +52,8 @@ import {
   GEN_AI_INPUT_MESSAGES,
   GEN_AI_OUTPUT_MESSAGES,
   GEN_AI_SYSTEM_INSTRUCTIONS,
+  GEN_AI_INPUT_MULTIMODAL_METADATA,
+  GEN_AI_OUTPUT_MULTIMODAL_METADATA,
   GEN_AI_TOOL_DEFINITIONS,
   GEN_AI_AGENT_NAME,
   GEN_AI_USER_ID,
@@ -206,7 +208,22 @@ export function getLlmResponseAttributes(
 
 function messagePartToDict(part: MessagePart): Record<string, unknown> {
   if (typeof part === "object" && part !== null) {
-    return { ...part } as Record<string, unknown>;
+    const serialized = { ...part } as Record<string, unknown>;
+
+    // Public TypeScript interfaces follow the JavaScript camelCase convention,
+    // while the OpenTelemetry GenAI message JSON schemas use snake_case.
+    // Normalize the schema-defined multimodal fields at the serialization
+    // boundary without changing the public invocation API.
+    if ("mimeType" in serialized) {
+      serialized["mime_type"] = serialized["mimeType"];
+      delete serialized["mimeType"];
+    }
+    if ("fileId" in serialized) {
+      serialized["file_id"] = serialized["fileId"];
+      delete serialized["fileId"];
+    }
+
+    return serialized;
   }
   return { value: part };
 }
@@ -230,6 +247,36 @@ function outputMessageToDict(
   };
 }
 
+function extractUriMetadata(
+  messages: Array<InputMessage | OutputMessage>,
+): Record<string, unknown>[] {
+  const metadata: Record<string, unknown>[] = [];
+
+  for (const message of messages) {
+    for (const part of message.parts ?? []) {
+      if (
+        typeof part !== "object" ||
+        part === null ||
+        part.type !== "uri" ||
+        !("mimeType" in part) ||
+        !("uri" in part) ||
+        !("modality" in part)
+      ) {
+        continue;
+      }
+
+      metadata.push({
+        type: "uri",
+        mime_type: part.mimeType,
+        uri: part.uri,
+        modality: part.modality,
+      });
+    }
+  }
+
+  return metadata;
+}
+
 export function getLlmMessagesAttributesForSpan(
   inputMessages: InputMessage[],
   outputMessages: OutputMessage[],
@@ -249,11 +296,23 @@ export function getLlmMessagesAttributesForSpan(
     attrs[GEN_AI_INPUT_MESSAGES] = genAiJsonDumps(
       inputMessages.map(inputMessageToDict),
     );
+    const inputMultimodalMetadata = extractUriMetadata(inputMessages);
+    if (inputMultimodalMetadata.length) {
+      attrs[GEN_AI_INPUT_MULTIMODAL_METADATA] = genAiJsonDumps(
+        inputMultimodalMetadata,
+      );
+    }
   }
   if (outputMessages.length) {
     attrs[GEN_AI_OUTPUT_MESSAGES] = genAiJsonDumps(
       outputMessages.map(outputMessageToDict),
     );
+    const outputMultimodalMetadata = extractUriMetadata(outputMessages);
+    if (outputMultimodalMetadata.length) {
+      attrs[GEN_AI_OUTPUT_MULTIMODAL_METADATA] = genAiJsonDumps(
+        outputMultimodalMetadata,
+      );
+    }
   }
   if (systemInstruction?.length) {
     attrs[GEN_AI_SYSTEM_INSTRUCTIONS] = genAiJsonDumps(
