@@ -7,7 +7,7 @@ This is the Node.js equivalent of the Python `opentelemetry-util-genai` package,
 ## Installation
 
 ```bash
-npm install @loongsuite/otel-util-genai
+npm install @loongsuite/otel-util-genai@0.1.0
 ```
 
 ## Features
@@ -129,6 +129,42 @@ handler.memory(createMemoryInvocation("search", { userId: "user-1" }), (inv) => 
 | `OTEL_SEMCONV_STABILITY_OPT_IN` | Set to `gen_ai_latest_experimental` to enable experimental features | - |
 | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | Content capturing mode: `NO_CONTENT`, `SPAN_ONLY`, `EVENT_ONLY`, `SPAN_AND_EVENT` | `NO_CONTENT` |
 | `OTEL_INSTRUMENTATION_GENAI_EMIT_EVENT` | Whether to emit `gen_ai.client.inference.operation.details` events: `true`/`false` | Based on content mode |
+
+## Multimodal messages
+
+The TypeScript API uses idiomatic camelCase fields. When message content is
+captured, the SDK serializes them with the GenAI message schema names:
+
+```typescript
+const inputMessages = [
+  {
+    role: "user",
+    parts: [
+      { type: "text", content: "Describe this image." },
+      {
+        type: "uri",
+        mimeType: "image/jpeg",
+        modality: "image",
+        uri: "https://example.com/image.jpg",
+      },
+    ],
+  },
+];
+```
+
+The resulting `gen_ai.input.messages` JSON uses `mime_type`. File parts
+similarly use `file_id` instead of the public `fileId` field.
+
+In `SPAN_ONLY` and `SPAN_AND_EVENT` modes, URI parts are also summarized
+automatically in `gen_ai.input.multimodal_metadata` and
+`gen_ai.output.multimodal_metadata`. Only final URI parts are included in
+these summaries, matching the Python util behavior. Text, Blob, Base64Blob,
+and File parts remain in the message JSON but are not included in the URI
+metadata summaries.
+
+This package records telemetry; it does not upload media, convert provider
+file references, or make model requests. Applications must map the provider's
+actual request and response objects to the corresponding message parts.
 
 ## Supported Operation Types
 

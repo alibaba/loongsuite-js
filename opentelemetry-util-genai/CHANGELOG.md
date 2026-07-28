@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.0 (2026-07-27)
+
+首个 npm 正式稳定版本，包含 `0.1.0-beta.0` 至 `0.1.0-beta.13`
+期间完成的能力与修复，以及以下多模态增强。
+
+### Features
+
+- **多模态 URI 元数据自动采集**：启用实验语义规范并将消息内容采集到
+  Span 时，自动从 LLM 输入和输出消息的 `Uri` Part 汇总
+  `gen_ai.input.multimodal_metadata` /
+  `gen_ai.output.multimodal_metadata`；行为与 Python util 保持一致，仅汇总
+  URI，不包含 Blob、Base64Blob 或 File。
+
+### Bug Fixes
+
+- **多模态消息字段规范化**：TypeScript 公共 API 继续使用 `mimeType` /
+  `fileId`，写入 `gen_ai.input.messages`、`gen_ai.output.messages` 和
+  `gen_ai.system_instructions` 时转换为 Schema 要求的 `mime_type` /
+  `file_id`。
+- **URI metadata 提取兼容性与校验**：同时支持 TypeScript API 的
+  `mimeType` 和 event-log Schema JSON 的 `mime_type`；仅在 URI、
+  modality 和 MIME 类型合法时生成 multimodal metadata，避免写入残缺或
+  类型错误的数据。
+- **Instrumentation scope 版本一致性**：默认 `otel.scope.version` 与 npm
+  包版本统一为 `0.1.0`。
+
 ## 0.1.0-beta.13 (2026-07-23)
 
 ### Features
@@ -154,7 +180,9 @@ All new fields are optional — plugins ignoring them stay fully backward compat
 - Event log → OTel span tree converter (`convertEventLogToTrace` / `convertEventLogToReadableSpans`).
 - user-hook events auto-merge into ENTRY span input.messages.
 
-## 0.1.0 (2026-04-14)
+## Pre-release baseline (2026-04-14)
+
+> 源码初始实现里程碑；未以正式 `0.1.0` 发布到 npm。
 
 ### Features
 

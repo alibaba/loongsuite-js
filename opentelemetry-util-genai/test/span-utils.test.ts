@@ -23,6 +23,9 @@ import {
   GEN_AI_RESPONSE_FINISH_REASONS,
   GEN_AI_RESPONSE_TIME_TO_FIRST_TOKEN,
   GEN_AI_INPUT_MESSAGES,
+  GEN_AI_OUTPUT_MESSAGES,
+  GEN_AI_INPUT_MULTIMODAL_METADATA,
+  GEN_AI_OUTPUT_MULTIMODAL_METADATA,
 } from "../src/semconv/gen-ai-extended-attributes.js";
 
 describe("span-utils", () => {
@@ -168,6 +171,326 @@ describe("span-utils", () => {
       expect(attrs[GEN_AI_INPUT_MESSAGES]).toBeDefined();
       expect(typeof attrs[GEN_AI_INPUT_MESSAGES]).toBe("string");
     });
+
+    it("serializes multimodal part fields with schema-compliant names", () => {
+      process.env["OTEL_SEMCONV_STABILITY_OPT_IN"] =
+        "gen_ai_latest_experimental";
+      process.env["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] =
+        "SPAN_ONLY";
+      const attrs = getLlmMessagesAttributesForSpan(
+        [
+          {
+            role: "user",
+            parts: [
+              {
+                type: "uri",
+                mimeType: "audio/wav",
+                modality: "audio",
+                uri: "https://example.com/input.wav",
+              },
+              {
+                type: "file",
+                mimeType: "image/png",
+                modality: "image",
+                fileId: "file-1",
+              },
+            ],
+          },
+        ],
+        [],
+      );
+
+      const messages = JSON.parse(attrs[GEN_AI_INPUT_MESSAGES] as string);
+      expect(messages[0].parts).toEqual([
+        {
+          type: "uri",
+          mime_type: "audio/wav",
+          modality: "audio",
+          uri: "https://example.com/input.wav",
+        },
+        {
+          type: "file",
+          mime_type: "image/png",
+          modality: "image",
+          file_id: "file-1",
+        },
+      ]);
+      expect(
+        JSON.parse(
+          attrs[GEN_AI_INPUT_MULTIMODAL_METADATA] as string,
+        ),
+      ).toEqual([
+        {
+          type: "uri",
+          mime_type: "audio/wav",
+          uri: "https://example.com/input.wav",
+          modality: "audio",
+        },
+      ]);
+    });
+
+    it("extracts input and output URI metadata only", () => {
+      process.env["OTEL_SEMCONV_STABILITY_OPT_IN"] =
+        "gen_ai_latest_experimental";
+      process.env["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] =
+        "SPAN_ONLY";
+      const attrs = getLlmMessagesAttributesForSpan(
+        [
+          {
+            role: "user",
+            parts: [
+              { type: "text", content: "describe the media" },
+              {
+                type: "uri",
+                mimeType: "image/png",
+                modality: "image",
+                uri: "https://example.com/input.png",
+              },
+              {
+                type: "file",
+                mimeType: "application/pdf",
+                modality: "document",
+                fileId: "file-1",
+              },
+              {
+                type: "base64_blob",
+                mimeType: "audio/wav",
+                modality: "audio",
+                content: "ZGF0YQ==",
+              },
+              {
+                type: "uri",
+              },
+            ],
+          },
+        ],
+        [
+          {
+            role: "assistant",
+            parts: [
+              { type: "text", content: "generated video" },
+              {
+                type: "uri",
+                mimeType: "video/mp4",
+                modality: "video",
+                uri: "https://example.com/output.mp4",
+              },
+              {
+                type: "uri",
+                mimeType: "audio/mpeg",
+                modality: "audio",
+                uri: "https://example.com/output.mp3",
+              },
+            ],
+            finishReason: "stop",
+          },
+        ],
+      );
+
+      expect(typeof attrs[GEN_AI_INPUT_MESSAGES]).toBe("string");
+      expect(typeof attrs[GEN_AI_OUTPUT_MESSAGES]).toBe("string");
+      expect(
+        JSON.parse(
+          attrs[GEN_AI_INPUT_MULTIMODAL_METADATA] as string,
+        ),
+      ).toEqual([
+        {
+          type: "uri",
+          mime_type: "image/png",
+          uri: "https://example.com/input.png",
+          modality: "image",
+        },
+      ]);
+      expect(
+        JSON.parse(
+          attrs[GEN_AI_OUTPUT_MULTIMODAL_METADATA] as string,
+        ),
+      ).toEqual([
+        {
+          type: "uri",
+          mime_type: "video/mp4",
+          uri: "https://example.com/output.mp4",
+          modality: "video",
+        },
+        {
+          type: "uri",
+          mime_type: "audio/mpeg",
+          uri: "https://example.com/output.mp3",
+          modality: "audio",
+        },
+      ]);
+    });
+
+    it("accepts schema snake_case URI parts and nullable MIME types", () => {
+      process.env["OTEL_SEMCONV_STABILITY_OPT_IN"] =
+        "gen_ai_latest_experimental";
+      process.env["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] =
+        "SPAN_ONLY";
+      const attrs = getLlmMessagesAttributesForSpan(
+        [
+          {
+            role: "user",
+            parts: [
+              {
+                type: "uri",
+                mime_type: "image/png",
+                modality: "image",
+                uri: "https://example.com/input.png",
+              },
+              {
+                type: "uri",
+                mime_type: null,
+                modality: "audio",
+                uri: "https://example.com/input",
+              },
+            ],
+          },
+        ],
+        [],
+      );
+
+      expect(
+        JSON.parse(
+          attrs[GEN_AI_INPUT_MULTIMODAL_METADATA] as string,
+        ),
+      ).toEqual([
+        {
+          type: "uri",
+          mime_type: "image/png",
+          uri: "https://example.com/input.png",
+          modality: "image",
+        },
+        {
+          type: "uri",
+          mime_type: null,
+          uri: "https://example.com/input",
+          modality: "audio",
+        },
+      ]);
+    });
+
+    it("skips URI metadata with undefined or invalid field types", () => {
+      process.env["OTEL_SEMCONV_STABILITY_OPT_IN"] =
+        "gen_ai_latest_experimental";
+      process.env["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] =
+        "SPAN_ONLY";
+      const attrs = getLlmMessagesAttributesForSpan(
+        [
+          {
+            role: "user",
+            parts: [
+              {
+                type: "uri",
+                mime_type: undefined,
+                modality: "image",
+                uri: "https://example.com/no-mime",
+              },
+              {
+                type: "uri",
+                mimeType: 42,
+                modality: "image",
+                uri: "https://example.com/numeric-mime",
+              },
+              {
+                type: "uri",
+                mimeType: "image/png",
+                modality: "image",
+                uri: 99,
+              },
+              {
+                type: "uri",
+                mimeType: "image/png",
+                modality: { invalid: true },
+                uri: "https://example.com/object-modality",
+              },
+            ],
+          },
+        ],
+        [],
+      );
+
+      expect(attrs[GEN_AI_INPUT_MESSAGES]).toBeDefined();
+      expect(attrs[GEN_AI_INPUT_MULTIMODAL_METADATA]).toBeUndefined();
+    });
+
+    it.each(["NO_CONTENT", "EVENT_ONLY"])(
+      "does not add span multimodal metadata in %s mode",
+      (mode) => {
+        process.env["OTEL_SEMCONV_STABILITY_OPT_IN"] =
+          "gen_ai_latest_experimental";
+        process.env[
+          "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"
+        ] = mode;
+
+        const attrs = getLlmMessagesAttributesForSpan(
+          [
+            {
+              role: "user",
+              parts: [
+                {
+                  type: "uri",
+                  mimeType: "image/jpeg",
+                  modality: "image",
+                  uri: "https://example.com/input.jpg",
+                },
+              ],
+            },
+          ],
+          [],
+        );
+
+        expect(attrs).toEqual({});
+      },
+    );
+
+    it("adds span multimodal metadata in SPAN_AND_EVENT mode", () => {
+      process.env["OTEL_SEMCONV_STABILITY_OPT_IN"] =
+        "gen_ai_latest_experimental";
+      process.env["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] =
+        "SPAN_AND_EVENT";
+
+      const attrs = getLlmMessagesAttributesForSpan(
+        [
+          {
+            role: "user",
+            parts: [
+              {
+                type: "uri",
+                mimeType: "image/jpeg",
+                modality: "image",
+                uri: "https://example.com/input.jpg",
+              },
+            ],
+          },
+        ],
+        [],
+      );
+
+      expect(
+        JSON.parse(
+          attrs[GEN_AI_INPUT_MULTIMODAL_METADATA] as string,
+        ),
+      ).toHaveLength(1);
+    });
+
+    it("does not derive metadata from system instructions", () => {
+      process.env["OTEL_SEMCONV_STABILITY_OPT_IN"] =
+        "gen_ai_latest_experimental";
+      process.env["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] =
+        "SPAN_ONLY";
+
+      const attrs = getLlmMessagesAttributesForSpan([], [], [
+        {
+          type: "uri",
+          mimeType: "image/jpeg",
+          modality: "image",
+          uri: "https://example.com/system.jpg",
+        },
+      ]);
+
+      expect(attrs[GEN_AI_INPUT_MULTIMODAL_METADATA]).toBeUndefined();
+      expect(attrs[GEN_AI_OUTPUT_MULTIMODAL_METADATA]).toBeUndefined();
+    });
   });
 
   describe("applyLlmFinishAttributes", () => {
@@ -189,6 +512,54 @@ describe("span-utils", () => {
 
       expect(mockSpan.updateName).toHaveBeenCalledWith("chat gpt-4");
       expect(mockSpan.setAttributes).toHaveBeenCalled();
+    });
+
+    it("allows explicit attributes to override derived multimodal metadata", () => {
+      process.env["OTEL_SEMCONV_STABILITY_OPT_IN"] =
+        "gen_ai_latest_experimental";
+      process.env["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] =
+        "SPAN_ONLY";
+      const mockSpan = {
+        updateName: vi.fn(),
+        setAttributes: vi.fn(),
+        setAttribute: vi.fn(),
+        isRecording: vi.fn().mockReturnValue(true),
+        setStatus: vi.fn(),
+      };
+      const override = JSON.stringify([
+        {
+          type: "uri",
+          mime_type: "image/webp",
+          uri: "sls://project/logstore/object",
+          modality: "image",
+        },
+      ]);
+      const inv = createLLMInvocation({
+        requestModel: "gpt-4",
+        inputMessages: [
+          {
+            role: "user",
+            parts: [
+              {
+                type: "uri",
+                mimeType: "image/jpeg",
+                modality: "image",
+                uri: "https://example.com/input.jpg",
+              },
+            ],
+          },
+        ],
+        attributes: {
+          [GEN_AI_INPUT_MULTIMODAL_METADATA]: override,
+        },
+      });
+
+      applyLlmFinishAttributes(mockSpan as any, inv);
+
+      const applied = mockSpan.setAttributes.mock.calls[0][0];
+      expect(applied[GEN_AI_INPUT_MULTIMODAL_METADATA]).toBe(
+        override,
+      );
     });
   });
 
