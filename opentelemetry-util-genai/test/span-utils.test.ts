@@ -321,6 +321,98 @@ describe("span-utils", () => {
       ]);
     });
 
+    it("accepts schema snake_case URI parts and nullable MIME types", () => {
+      process.env["OTEL_SEMCONV_STABILITY_OPT_IN"] =
+        "gen_ai_latest_experimental";
+      process.env["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] =
+        "SPAN_ONLY";
+      const attrs = getLlmMessagesAttributesForSpan(
+        [
+          {
+            role: "user",
+            parts: [
+              {
+                type: "uri",
+                mime_type: "image/png",
+                modality: "image",
+                uri: "https://example.com/input.png",
+              },
+              {
+                type: "uri",
+                mime_type: null,
+                modality: "audio",
+                uri: "https://example.com/input",
+              },
+            ],
+          },
+        ],
+        [],
+      );
+
+      expect(
+        JSON.parse(
+          attrs[GEN_AI_INPUT_MULTIMODAL_METADATA] as string,
+        ),
+      ).toEqual([
+        {
+          type: "uri",
+          mime_type: "image/png",
+          uri: "https://example.com/input.png",
+          modality: "image",
+        },
+        {
+          type: "uri",
+          mime_type: null,
+          uri: "https://example.com/input",
+          modality: "audio",
+        },
+      ]);
+    });
+
+    it("skips URI metadata with undefined or invalid field types", () => {
+      process.env["OTEL_SEMCONV_STABILITY_OPT_IN"] =
+        "gen_ai_latest_experimental";
+      process.env["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] =
+        "SPAN_ONLY";
+      const attrs = getLlmMessagesAttributesForSpan(
+        [
+          {
+            role: "user",
+            parts: [
+              {
+                type: "uri",
+                mime_type: undefined,
+                modality: "image",
+                uri: "https://example.com/no-mime",
+              },
+              {
+                type: "uri",
+                mimeType: 42,
+                modality: "image",
+                uri: "https://example.com/numeric-mime",
+              },
+              {
+                type: "uri",
+                mimeType: "image/png",
+                modality: "image",
+                uri: 99,
+              },
+              {
+                type: "uri",
+                mimeType: "image/png",
+                modality: { invalid: true },
+                uri: "https://example.com/object-modality",
+              },
+            ],
+          },
+        ],
+        [],
+      );
+
+      expect(attrs[GEN_AI_INPUT_MESSAGES]).toBeDefined();
+      expect(attrs[GEN_AI_INPUT_MULTIMODAL_METADATA]).toBeUndefined();
+    });
+
     it.each(["NO_CONTENT", "EVENT_ONLY"])(
       "does not add span multimodal metadata in %s mode",
       (mode) => {

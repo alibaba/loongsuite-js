@@ -254,22 +254,28 @@ function extractUriMetadata(
 
   for (const message of messages) {
     for (const part of message.parts ?? []) {
+      // Direct TypeScript callers use camelCase fields, while event-log
+      // messages are already schema JSON and use snake_case. Reuse the
+      // serialization boundary so both inputs have one normalized shape.
+      const serialized = messagePartToDict(part);
+      const mimeType = serialized["mime_type"];
+      const uri = serialized["uri"];
+      const modality = serialized["modality"];
+
       if (
-        typeof part !== "object" ||
-        part === null ||
-        part.type !== "uri" ||
-        !("mimeType" in part) ||
-        !("uri" in part) ||
-        !("modality" in part)
+        serialized["type"] !== "uri" ||
+        (typeof mimeType !== "string" && mimeType !== null) ||
+        typeof uri !== "string" ||
+        typeof modality !== "string"
       ) {
         continue;
       }
 
       metadata.push({
         type: "uri",
-        mime_type: part.mimeType,
-        uri: part.uri,
-        modality: part.modality,
+        mime_type: mimeType,
+        uri,
+        modality,
       });
     }
   }

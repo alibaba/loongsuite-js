@@ -19,6 +19,10 @@
   `fileId`，写入 `gen_ai.input.messages`、`gen_ai.output.messages` 和
   `gen_ai.system_instructions` 时转换为 Schema 要求的 `mime_type` /
   `file_id`。
+- **URI metadata 提取兼容性与校验**：同时支持 TypeScript API 的
+  `mimeType` 和 event-log Schema JSON 的 `mime_type`；仅在 URI、
+  modality 和 MIME 类型合法时生成 multimodal metadata，避免写入残缺或
+  类型错误的数据。
 - **Instrumentation scope 版本一致性**：默认 `otel.scope.version` 与 npm
   包版本统一为 `0.1.0`。
 
