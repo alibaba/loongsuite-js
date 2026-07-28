@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.*
+!.env.example
+.npmrc
+*.pem
+*.key
+*.p12
+*.log
+trace-*.json
+*-trace.json
+npm-debug.log*
+.DS_Store

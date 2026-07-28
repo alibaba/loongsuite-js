@@ -83,3 +83,31 @@ jobs:
       - name: Run tests
         working-directory: opentelemetry-util-genai
         run: npm test
+
+  test-util-genai-demo:
+    name: Test opentelemetry-util-genai Node.js demo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+          cache-dependency-path: |
+            opentelemetry-util-genai/examples/nodejs-genai-util-demo/package-lock.json
+            opentelemetry-util-genai/examples/nodejs-genai-util-demo/arms-probe-demo/package-lock.json
+      - name: Install manual instrumentation demo dependencies
+        working-directory: opentelemetry-util-genai/examples/nodejs-genai-util-demo
+        run: npm ci
+      - name: Run manual instrumentation demo tests
+        working-directory: opentelemetry-util-genai/examples/nodejs-genai-util-demo
+        run: npm test
+      - name: Run offline demo
+        working-directory: opentelemetry-util-genai/examples/nodejs-genai-util-demo
+        run: npm run demo
+      - name: Validate ARMS probe demo
+        working-directory: opentelemetry-util-genai/examples/nodejs-genai-util-demo/arms-probe-demo
+        run: |
+          npm ci
+          node --check app.js

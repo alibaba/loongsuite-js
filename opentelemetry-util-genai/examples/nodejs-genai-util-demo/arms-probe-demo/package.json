@@ -1,0 +1,17 @@
+{
+  "name": "loongsuite-genai-arms-probe-validation",
+  "version": "1.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "ARMS Node.js 探针 OpenAI 自动埋点端到端验证",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node -r @loongsuite/cms_node_sdk/register app.js"
+  },
+  "dependencies": {
+    "@loongsuite/cms_node_sdk": "1.0.4",
+    "openai": "5.23.2"
+  }
+}

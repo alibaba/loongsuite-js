@@ -403,6 +403,14 @@ if (result.lateDroppedRecordCount > 0) raiseAlarm(result.warnings);
 - The batch `convertEventLogToTrace` is unchanged and shares the same underlying
   conversion, so both paths produce equivalent spans.
 
+## Examples
+
+The [Node.js GenAI instrumentation
+demo](examples/nodejs-genai-util-demo/README.md) includes offline tests, a real
+DashScope tool-calling flow, multimodal and Event Log OTLP export, and a
+separate ARMS Node.js probe validation application. Credentials and OTLP
+connection details are supplied only through environment variables.
+
 ## License
 
 Apache License 2.0

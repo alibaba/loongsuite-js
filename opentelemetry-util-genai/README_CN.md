@@ -347,6 +347,13 @@ if (result.lateDroppedRecordCount > 0) raiseAlarm(result.warnings);
   记录数。父 step 驻留受 grace 窗口控制,但单个未结束 step 仍可能包含大量记录。
 - 批处理 `convertEventLogToTrace` 未改动,且与流式共用底层转换,两条路径产出等价的 span。
 
+## 示例
+
+[Node.js GenAI 自定义埋点
+Demo](examples/nodejs-genai-util-demo/README.md)包含离线测试、真实 DashScope
+Tool Calling、多模态和 Event Log OTLP 导出，以及独立的 ARMS Node.js 探针验证程序。
+鉴权信息和 OTLP 接入参数只通过环境变量传入。
+
 ## 许可证
 
 Apache License 2.0
