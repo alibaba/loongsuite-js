@@ -1,12 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { runAgentRequest } from "./agent.mjs";
+import { enableDemoContentExport } from "./safety.mjs";
 import { ScriptedModelClient } from "./scripted-model.mjs";
 import { createOtlpRuntime } from "./telemetry.mjs";
 
-process.env.OTEL_SEMCONV_STABILITY_OPT_IN =
-  "gen_ai_latest_experimental";
-process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT =
-  "SPAN_ONLY";
+enableDemoContentExport();
 
 const runtime = createOtlpRuntime({
   serviceName:

@@ -11,17 +11,11 @@ import {
   toGenAIOutputMessage,
   toGenAIToolDefinitions,
 } from "./messages.mjs";
+import { toSafeGenAIError } from "./safety.mjs";
 import { dispatchTool, TOOL_DEFINITIONS } from "./tools.mjs";
 
 const AGENT_NAME = "WeatherAgent";
 const MAX_ITERATIONS = 4;
-
-function toGenAIError(error, fallbackType) {
-  return {
-    message: error instanceof Error ? error.message : String(error),
-    type: error instanceof Error ? error.constructor.name : fallbackType,
-  };
-}
 
 export async function runAgentRequest({
   handler,
@@ -76,48 +70,51 @@ export async function runAgentRequest({
           });
           handler.startLlm(llmInv, stepInv.contextToken);
 
-          let response;
+          let choice;
           try {
             // startXxx only returns a Context; it does not make that Context
             // active. context.with is required for auto-instrumented SDK/HTTP
             // spans to become children of this manually-created LLM span.
-            response = await context.with(llmInv.contextToken, () =>
+            const response = await context.with(llmInv.contextToken, () =>
               modelClient.complete({
                 model,
                 messages,
                 tools: TOOL_DEFINITIONS,
               }),
             );
+
+            choice = response.choices?.[0];
+            if (!choice?.message) {
+              throw new Error("The model response has no first choice");
+            }
+
+            const usage = response.usage;
+            if (usage) {
+              llmInv.inputTokens = usage.prompt_tokens ?? null;
+              llmInv.outputTokens = usage.completion_tokens ?? null;
+              llmInv.totalTokens = usage.total_tokens ?? null;
+              totalInputTokens += usage.prompt_tokens ?? 0;
+              totalOutputTokens += usage.completion_tokens ?? 0;
+            }
+            llmInv.responseId = response.id ?? null;
+            llmInv.responseModelName = response.model ?? model;
+            // Keep the provider's raw finish reason on the span attribute.
+            // The message schema separately normalizes "tool_calls" to
+            // the singular "tool_call".
+            llmInv.finishReasons = [choice.finish_reason ?? "stop"];
+            llmInv.outputMessages = [
+              toGenAIOutputMessage(choice.message, choice.finish_reason),
+            ];
+            handler.stopLlm(llmInv);
           } catch (error) {
-            handler.failLlm(llmInv, toGenAIError(error, "LLMError"));
+            if (llmInv.span?.isRecording()) {
+              handler.failLlm(
+                llmInv,
+                toSafeGenAIError(error, "LLMError", "LLM request failed"),
+              );
+            }
             throw error;
           }
-
-          const choice = response.choices?.[0];
-          if (!choice?.message) {
-            const error = new Error("The model response has no first choice");
-            handler.failLlm(llmInv, toGenAIError(error, "LLMError"));
-            throw error;
-          }
-
-          const usage = response.usage;
-          if (usage) {
-            llmInv.inputTokens = usage.prompt_tokens ?? null;
-            llmInv.outputTokens = usage.completion_tokens ?? null;
-            llmInv.totalTokens = usage.total_tokens ?? null;
-            totalInputTokens += usage.prompt_tokens ?? 0;
-            totalOutputTokens += usage.completion_tokens ?? 0;
-          }
-          llmInv.responseId = response.id ?? null;
-          llmInv.responseModelName = response.model ?? model;
-          // Keep the provider's raw finish reason on the span attribute.
-          // The message schema separately normalizes "tool_calls" to
-          // the singular "tool_call".
-          llmInv.finishReasons = [choice.finish_reason ?? "stop"];
-          llmInv.outputMessages = [
-            toGenAIOutputMessage(choice.message, choice.finish_reason),
-          ];
-          handler.stopLlm(llmInv);
 
           const toolCalls = choice.message.tool_calls ?? [];
           if (toolCalls.length > 0) {
@@ -157,10 +154,16 @@ export async function runAgentRequest({
                   content: result,
                 });
               } catch (error) {
-                handler.failExecuteTool(
-                  toolInv,
-                  toGenAIError(error, "ToolError"),
-                );
+                if (toolInv.span?.isRecording()) {
+                  handler.failExecuteTool(
+                    toolInv,
+                    toSafeGenAIError(
+                      error,
+                      "ToolError",
+                      "Tool execution failed",
+                    ),
+                  );
+                }
                 throw error;
               }
             }
@@ -178,7 +181,7 @@ export async function runAgentRequest({
           if (stepInv.span?.isRecording()) {
             handler.failReactStep(
               stepInv,
-              toGenAIError(error, "StepError"),
+              toSafeGenAIError(error, "StepError", "Agent step failed"),
             );
           }
           throw error;
@@ -217,14 +220,25 @@ export async function runAgentRequest({
       if (agentInv.span?.isRecording()) {
         handler.failInvokeAgent(
           agentInv,
-          toGenAIError(error, "AgentError"),
+          toSafeGenAIError(
+            error,
+            "AgentError",
+            "Agent invocation failed",
+          ),
         );
       }
       throw error;
     }
   } catch (error) {
     if (entryInv.span?.isRecording()) {
-      handler.failEntry(entryInv, toGenAIError(error, "EntryError"));
+      handler.failEntry(
+        entryInv,
+        toSafeGenAIError(
+          error,
+          "EntryError",
+          "Application request failed",
+        ),
+      );
     }
     throw error;
   }

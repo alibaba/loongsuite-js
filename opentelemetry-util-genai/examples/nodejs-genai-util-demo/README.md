@@ -55,11 +55,25 @@ npm run demo:dashscope
 
 默认调用 DashScope 的 OpenAI 兼容接口和 `qwen-plus`。程序会输出回答、traceId 和本地收集到的 span 树。
 
+## OTLP 内容导出安全确认
+
+下面的 OTLP Demo 为验证消息和多模态属性，会使用 `SPAN_ONLY` 把完整输入和输出写入
+Trace。运行前必须显式设置：
+
+```bash
+export GENAI_DEMO_ALLOW_CONTENT_EXPORT="true"
+```
+
+这个开关只表示操作者已经确认内容可以发送到所配置的 OTLP 后端，不会自动完成脱敏。
+只能使用公开、虚构或已经脱敏的数据；不要使用真实业务 Prompt、个人信息、私有图片或
+包含临时鉴权参数的 URL。生产接入应默认使用 `NO_CONTENT`。
+
 ## OTLP 导出验证
 
 从 ARMS 控制台复制当前应用的 OTLP HTTP 接入地址和鉴权 Header，然后设置：
 
 ```bash
+export GENAI_DEMO_ALLOW_CONTENT_EXPORT="true"
 export OTEL_SERVICE_NAME="your-genai-service"
 export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="<console-provided-traces-endpoint>"
 export OTEL_EXPORTER_OTLP_HEADERS="Authentication=<credential>"
@@ -82,6 +96,7 @@ export completed traceId=<trace-id>
 
 ```bash
 export DASHSCOPE_API_KEY="<your-api-key>"
+export GENAI_DEMO_ALLOW_CONTENT_EXPORT="true"
 export OTEL_SERVICE_NAME="your-genai-service"
 export OTEL_RESOURCE_ATTRIBUTES="service.name=your-genai-service"
 export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="<console-provided-traces-endpoint>"
@@ -104,6 +119,7 @@ npm run demo:e2e
 
 ```bash
 export DASHSCOPE_API_KEY="<your-api-key>"
+export GENAI_DEMO_ALLOW_CONTENT_EXPORT="true"
 export OTEL_SERVICE_NAME="your-multimodal-service"
 export OTEL_RESOURCE_ATTRIBUTES="service.name=your-multimodal-service"
 export OTEL_EXPORTER_OTLP_ENDPOINT="<console-provided-endpoint>"
@@ -120,6 +136,10 @@ export MULTIMODAL_IMAGE_MIME_TYPE="image/jpeg"
 export MULTIMODAL_PROMPT="请描述这张图片。"
 ```
 
+自定义图片必须是不含敏感内容的公开 HTTPS URL；程序会拒绝用户名、密码、query、
+fragment、私网主机和私网 IP。不要使用 OSS、S3 等服务生成的预签名 URL，因为完整
+URI 会进入 `gen_ai.input.messages` 和 `gen_ai.input.multimodal_metadata`。
+
 这个 Demo 验证的是模型实际接收的 URL 图片，因此对应 GenAI `Uri`
 Part。`File` Part 的 `fileId -> file_id` 序列化由 util 单元测试覆盖，但在
 找到支持文件 ID 直接输入的模型接口并完成真实调用前，不把它作为本 Demo
@@ -132,6 +152,7 @@ Part。`File` Part 的 `fileId -> file_id` 序列化由 util 单元测试覆盖�
 验证 input/output multimodal metadata：
 
 ```bash
+export GENAI_DEMO_ALLOW_CONTENT_EXPORT="true"
 export OTEL_SERVICE_NAME="your-event-log-service"
 export OTEL_RESOURCE_ATTRIBUTES="service.name=your-event-log-service"
 export OTEL_EXPORTER_OTLP_ENDPOINT="<console-provided-endpoint>"
@@ -170,4 +191,5 @@ OpenTelemetry JS 1.x 依赖组合。当前 `npm audit` 会报告以下传递依�
 
 不要向此目录提交 API Key、ARMS License、OTLP 鉴权 Header、内部 Project 或
 Workspace、CLI profile、历史 traceId、Trace 导出文件或 `.env`。示例中的所有
-鉴权值都必须通过环境变量传入。
+鉴权值都必须通过环境变量传入。应用捕获的原始异常消息也可能包含响应体、请求参数、
+路径或凭据；本 Demo 只把固定安全消息和错误类型写入遥测，原始异常继续交给应用处理。

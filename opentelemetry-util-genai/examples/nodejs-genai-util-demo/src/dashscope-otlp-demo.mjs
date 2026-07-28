@@ -1,16 +1,14 @@
 import { randomUUID } from "node:crypto";
 import OpenAI from "openai";
 import { runAgentRequest } from "./agent.mjs";
+import { enableDemoContentExport } from "./safety.mjs";
 import { createOtlpRuntime } from "./telemetry.mjs";
 
 if (!process.env.DASHSCOPE_API_KEY) {
   throw new Error("DASHSCOPE_API_KEY is required");
 }
 
-process.env.OTEL_SEMCONV_STABILITY_OPT_IN =
-  "gen_ai_latest_experimental";
-process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT =
-  "SPAN_ONLY";
+enableDemoContentExport();
 
 const serviceName =
   process.env.OTEL_SERVICE_NAME ??

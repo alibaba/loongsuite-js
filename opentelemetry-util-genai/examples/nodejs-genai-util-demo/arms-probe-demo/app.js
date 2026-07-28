@@ -34,7 +34,7 @@ const server = http.createServer(async (_request, response) => {
     response.end(answer);
   } catch (error) {
     response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
-    response.end(error instanceof Error ? error.message : String(error));
+    response.end("probe model request failed");
   }
 });
 

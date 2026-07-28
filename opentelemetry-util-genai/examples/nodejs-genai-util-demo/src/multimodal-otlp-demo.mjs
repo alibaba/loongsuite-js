@@ -6,16 +6,18 @@ import {
   createEntryInvocation,
   createLLMInvocation,
 } from "@loongsuite/otel-util-genai";
+import {
+  enableDemoContentExport,
+  toSafeGenAIError,
+  validatePublicImageUrl,
+} from "./safety.mjs";
 import { createOtlpRuntime } from "./telemetry.mjs";
 
 if (!process.env.DASHSCOPE_API_KEY) {
   throw new Error("DASHSCOPE_API_KEY is required");
 }
 
-process.env.OTEL_SEMCONV_STABILITY_OPT_IN =
-  "gen_ai_latest_experimental";
-process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT =
-  "SPAN_ONLY";
+enableDemoContentExport();
 
 const serviceName =
   process.env.OTEL_SERVICE_NAME ??
@@ -24,9 +26,10 @@ const model = process.env.MODEL_NAME ?? "qwen3-vl-plus";
 const prompt =
   process.env.MULTIMODAL_PROMPT ??
   "请描述图片中的人物、动物和场景，用一句中文回答。";
-const imageUrl =
+const imageUrl = validatePublicImageUrl(
   process.env.MULTIMODAL_IMAGE_URL ??
-  "https://dashscope.oss-cn-beijing.aliyuncs.com/images/dog_and_girl.jpeg";
+    "https://dashscope.oss-cn-beijing.aliyuncs.com/images/dog_and_girl.jpeg",
+);
 const imageMimeType =
   process.env.MULTIMODAL_IMAGE_MIME_TYPE ?? "image/jpeg";
 
@@ -94,48 +97,59 @@ try {
         ],
       }),
     );
+
+    const choice = response.choices?.[0];
+    if (!choice?.message) {
+      throw new Error("The model response has no first choice");
+    }
+
+    llmInvocation.responseId = response.id ?? null;
+    llmInvocation.responseModelName = response.model ?? model;
+    llmInvocation.finishReasons = [choice.finish_reason ?? "stop"];
+    llmInvocation.inputTokens = response.usage?.prompt_tokens ?? null;
+    llmInvocation.outputTokens =
+      response.usage?.completion_tokens ?? null;
+    llmInvocation.totalTokens = response.usage?.total_tokens ?? null;
+    llmInvocation.outputMessages = [
+      {
+        role: "assistant",
+        parts: [
+          {
+            type: "text",
+            content: choice.message.content ?? "",
+          },
+        ],
+        finishReason: choice.finish_reason ?? "stop",
+      },
+    ];
+    runtime.handler.stopLlm(llmInvocation);
   } catch (error) {
-    runtime.handler.failLlm(llmInvocation, {
-      type: error instanceof Error ? error.constructor.name : "LLMError",
-      message: error instanceof Error ? error.message : String(error),
-    });
+    if (llmInvocation.span?.isRecording()) {
+      runtime.handler.failLlm(
+        llmInvocation,
+        toSafeGenAIError(
+          error,
+          "LLMError",
+          "Multimodal LLM request failed",
+        ),
+      );
+    }
     throw error;
   }
-
-  const choice = response.choices?.[0];
-  if (!choice?.message) {
-    throw new Error("The model response has no first choice");
-  }
-
-  llmInvocation.responseId = response.id ?? null;
-  llmInvocation.responseModelName = response.model ?? model;
-  llmInvocation.finishReasons = [choice.finish_reason ?? "stop"];
-  llmInvocation.inputTokens = response.usage?.prompt_tokens ?? null;
-  llmInvocation.outputTokens = response.usage?.completion_tokens ?? null;
-  llmInvocation.totalTokens = response.usage?.total_tokens ?? null;
-  llmInvocation.outputMessages = [
-    {
-      role: "assistant",
-      parts: [
-        {
-          type: "text",
-          content: choice.message.content ?? "",
-        },
-      ],
-      finishReason: choice.finish_reason ?? "stop",
-    },
-  ];
-  runtime.handler.stopLlm(llmInvocation);
 
   entryInvocation.outputMessages = llmInvocation.outputMessages;
   runtime.handler.stopEntry(entryInvocation);
   traceId = entryInvocation.span.spanContext().traceId;
 } catch (error) {
   if (entryInvocation.span?.isRecording()) {
-    runtime.handler.failEntry(entryInvocation, {
-      type: error instanceof Error ? error.constructor.name : "Error",
-      message: error instanceof Error ? error.message : String(error),
-    });
+    runtime.handler.failEntry(
+      entryInvocation,
+      toSafeGenAIError(
+        error,
+        "EntryError",
+        "Multimodal validation failed",
+      ),
+    );
   }
   throw error;
 } finally {
