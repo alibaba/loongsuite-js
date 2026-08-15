@@ -11,6 +11,7 @@ import {
 import { ExtendedTelemetryHandler } from "../../src/extended-handler.js";
 import { convertEventLogToTrace } from "../../src/event-log/converter.js";
 import { createTurnStreamSession } from "../../src/event-log/turn-stream.js";
+import { getReadableSpanParentId } from "../otel-version-compat.js";
 import { EventName, EventLogConversionError, type EventLogRecord } from "../../src/event-log/types.js";
 import {
   GEN_AI_AGENT_NAME,
@@ -209,14 +210,14 @@ describe("TurnStreamSession", () => {
     const childAgent = byKind(spans, GenAiSpanKindValues.AGENT).find(
       (a) => a.attributes[GEN_AI_AGENT_NAME] === "child-agent",
     )!;
-    expect(childAgent.parentSpanId).toBe(tool.spanContext().spanId);
+    expect(getReadableSpanParentId(childAgent)).toBe(tool.spanContext().spanId);
     const childLlm = byKind(spans, GenAiSpanKindValues.LLM).find(
       (l) => l.attributes[GEN_AI_REQUEST_MODEL] === "claude-haiku",
     )!;
     const childStep = byKind(spans, GenAiSpanKindValues.STEP).find(
-      (st) => st.parentSpanId === childAgent.spanContext().spanId,
+      (st) => getReadableSpanParentId(st) === childAgent.spanContext().spanId,
     )!;
-    expect(childLlm.parentSpanId).toBe(childStep.spanContext().spanId);
+    expect(getReadableSpanParentId(childLlm)).toBe(childStep.spanContext().spanId);
     expect(new Set(spans.map((s) => s.spanContext().traceId)).size).toBe(1);
   });
 
@@ -344,7 +345,7 @@ describe("TurnStreamSession", () => {
         const ids = new Set(stream.map((s) => s.spanContext().spanId));
         for (const s of stream) {
           if (s.attributes[GEN_AI_SPAN_KIND] === GenAiSpanKindValues.ENTRY) continue;
-          expect(ids.has(s.parentSpanId!)).toBe(true);
+          expect(ids.has(getReadableSpanParentId(s)!)).toBe(true);
         }
 
         // LLM input.messages must match batch exactly — locks delta/full
@@ -436,7 +437,7 @@ describe("TurnStreamSession", () => {
     // Fragmented: 'other' marker, then request, then response in separate pushes.
     const { spans } = await runStream([[otherEvt], [req], [resp]]);
     const entry = spanOf(spans, GenAiSpanKindValues.ENTRY);
-    expect(entry.parentSpanId).toBe(PARENT_SPAN_ID); // NOT synthetic, NOT intra-trace noise
+    expect(getReadableSpanParentId(entry)).toBe(PARENT_SPAN_ID); // NOT synthetic, NOT intra-trace noise
     for (const s of spans) expect(s.spanContext().traceId).toBe(TRACE_ID);
   });
 
@@ -478,7 +479,7 @@ describe("TurnStreamSession", () => {
     await provider.forceFlush();
     const spans = exporter.getFinishedSpans();
     const entry = spanOf(spans, GenAiSpanKindValues.ENTRY);
-    expect(entry.parentSpanId).toBe(PARENT_SPAN_ID);
+    expect(getReadableSpanParentId(entry)).toBe(PARENT_SPAN_ID);
     for (const span of spans) expect(span.spanContext().traceId).toBe(TRACE_ID);
     expect(result.warnings).toEqual([]);
   });

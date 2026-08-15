@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.1 (2026-08-15)
+
+### Compatibility
+
+- `@opentelemetry/sdk-trace-base` 可选 peer dependency 扩展为
+  `^1.30.0 || ^2.10.0`，允许使用 OpenTelemetry 2.10 trace SDK 的消费方
+  无冲突安装，同时保留 1.30.x 兼容性。
+- CI 增加 OpenTelemetry 1.30.1 / 2.10.0 双版本构建、真实 trace/metric
+  provider 集成测试和打包后干净安装验证。
+- 测试兼容 OpenTelemetry 1.x 的 `ReadableSpan.parentSpanId` 与 2.x 的
+  `ReadableSpan.parentSpanContext.spanId`；不改变 SDK 运行时 span 数据。
+
+### Internal
+
+- 更新测试工具链的 `nanoid` / `postcss` 锁定版本，保持高危级别 npm audit
+  检查通过。
+
 ## 0.1.0 (2026-07-27)
 
 首个 npm 正式稳定版本，包含 `0.1.0-beta.0` 至 `0.1.0-beta.13`

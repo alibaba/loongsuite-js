@@ -10,6 +10,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { ExtendedTelemetryHandler } from "../../src/extended-handler.js";
 import { convertEventLogToTrace } from "../../src/event-log/converter.js";
+import { getReadableSpanParentId } from "../otel-version-compat.js";
 import {
   GEN_AI_INPUT_MESSAGES,
   GEN_AI_OUTPUT_MESSAGES,
@@ -89,10 +90,10 @@ describe("integration: span tree structure", () => {
     const llm = spansByKind(spans, GenAiSpanKindValues.LLM)[0]!;
     const tool = spansByKind(spans, GenAiSpanKindValues.TOOL)[0]!;
 
-    expect(agent.parentSpanId).toBe(entry.spanContext().spanId);
-    expect(step.parentSpanId).toBe(agent.spanContext().spanId);
-    expect(llm.parentSpanId).toBe(step.spanContext().spanId);
-    expect(tool.parentSpanId).toBe(step.spanContext().spanId);
+    expect(getReadableSpanParentId(agent)).toBe(entry.spanContext().spanId);
+    expect(getReadableSpanParentId(step)).toBe(agent.spanContext().spanId);
+    expect(getReadableSpanParentId(llm)).toBe(step.spanContext().spanId);
+    expect(getReadableSpanParentId(tool)).toBe(step.spanContext().spanId);
   });
 });
 
