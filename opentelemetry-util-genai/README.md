@@ -7,7 +7,7 @@ This is the Node.js equivalent of the Python `opentelemetry-util-genai` package,
 ## Installation
 
 ```bash
-npm install @loongsuite/otel-util-genai@0.1.0
+npm install @loongsuite/otel-util-genai@0.1.1
 ```
 
 ## Features
@@ -276,6 +276,9 @@ tears the provider down. It is never registered globally, so it cannot
 pollute the host process's OTel context. Requires
 `@opentelemetry/sdk-trace-base` at runtime (declared as an optional peer
 dep — install it in the consumer package).
+
+The optional peer supports `@opentelemetry/sdk-trace-base` 1.30.x and
+2.10.x (including later compatible releases within each major range).
 
 ### Behavior summary
 

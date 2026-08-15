@@ -14,6 +14,7 @@ import { convertEventLogToTrace } from "../../src/event-log/converter.js";
 import { ExtendedTelemetryHandler } from "../../src/extended-handler.js";
 import { EventName, type EventLogRecord } from "../../src/event-log/types.js";
 import { GEN_AI_SPAN_KIND, GenAiSpanKindValues } from "../../src/semconv/gen-ai-extended-attributes.js";
+import { getReadableSpanParentId } from "../otel-version-compat.js";
 
 const ORIGINAL_ENV: Record<string, string | undefined> = {};
 beforeAll(() => {
@@ -203,7 +204,7 @@ describe("E2E: ENTRY span parentSpanId equals upstream value", () => {
     const entry = spans.find((s) => s.attributes[GEN_AI_SPAN_KIND] === GenAiSpanKindValues.ENTRY)!;
     expect(entry).toBeDefined();
     // ENTRY's parentSpanId should be the real upstream value, NOT synthetic
-    expect(entry.parentSpanId).toBe(PARENT_SPAN_ID);
+    expect(getReadableSpanParentId(entry)).toBe(PARENT_SPAN_ID);
     // All spans share the same traceId
     for (const s of spans) {
       expect(s.spanContext().traceId).toBe(TRACE_ID);
@@ -258,6 +259,6 @@ describe("E2E: ENTRY span parentSpanId equals upstream value", () => {
 
     const entry = spans.find((s) => s.attributes[GEN_AI_SPAN_KIND] === GenAiSpanKindValues.ENTRY)!;
     // Synthetic parent
-    expect(entry.parentSpanId).toBe("0".repeat(15) + "1");
+    expect(getReadableSpanParentId(entry)).toBe("0".repeat(15) + "1");
   });
 });

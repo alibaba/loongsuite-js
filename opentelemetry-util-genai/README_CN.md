@@ -7,7 +7,7 @@
 ## 安装
 
 ```bash
-npm install @loongsuite/otel-util-genai
+npm install @loongsuite/otel-util-genai@0.1.1
 ```
 
 ## 功能特性
@@ -236,6 +236,9 @@ exporter.export(spans, (result) => {
 运行转换、抓取 finished spans 后销毁 provider。**绝不**注册到全局，不会污
 染宿主进程的 OTel context。运行时需要 `@opentelemetry/sdk-trace-base`
 （声明为可选 peer dep——由消费方安装）。
+
+该可选 peer 同时支持 `@opentelemetry/sdk-trace-base` 1.30.x 与 2.10.x
+（以及各自大版本范围内后续兼容版本）。
 
 ### 行为要点
 

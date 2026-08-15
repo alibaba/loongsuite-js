@@ -10,6 +10,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { ExtendedTelemetryHandler } from "../../src/extended-handler.js";
 import { convertEventLogToTrace } from "../../src/event-log/converter.js";
+import { getReadableSpanParentId } from "../otel-version-compat.js";
 import {
   GEN_AI_AGENT_NAME,
   GEN_AI_REQUEST_MODEL,
@@ -87,18 +88,18 @@ describe("subagent nesting", () => {
       (a) => a.attributes[GEN_AI_AGENT_NAME] === "child-agent",
     )!;
     expect(childAgent).toBeDefined();
-    expect(childAgent.parentSpanId).toBe(toolSpan.spanContext().spanId);
+    expect(getReadableSpanParentId(childAgent)).toBe(toolSpan.spanContext().spanId);
 
     // Child LLM parent = child STEP, child STEP parent = child AGENT
     const childStep = steps.find(
-      (s) => s.parentSpanId === childAgent.spanContext().spanId,
+      (s) => getReadableSpanParentId(s) === childAgent.spanContext().spanId,
     )!;
     expect(childStep).toBeDefined();
     const childLlm = llms.find(
       (l) => l.attributes[GEN_AI_REQUEST_MODEL] === "claude-haiku",
     )!;
     expect(childLlm).toBeDefined();
-    expect(childLlm.parentSpanId).toBe(childStep.spanContext().spanId);
+    expect(getReadableSpanParentId(childLlm)).toBe(childStep.spanContext().spanId);
   });
 
   it("does not affect traces without subagent records (regression)", async () => {

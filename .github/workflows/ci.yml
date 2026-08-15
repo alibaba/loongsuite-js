@@ -58,11 +58,12 @@ jobs:
         run: npm run build
 
   build-and-test-util-genai:
-    name: Build & Test opentelemetry-util-genai
+    name: Build & Test opentelemetry-util-genai (Node ${{ matrix.node-version }}, OTel ${{ matrix.otel-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
         node-version: [20.x, 22.x]
+        otel-version: [1.30.1, 2.10.0]
     steps:
       - uses: actions/checkout@v4
       - name: Use Node.js ${{ matrix.node-version }}
@@ -73,7 +74,12 @@ jobs:
           cache-dependency-path: opentelemetry-util-genai/package-lock.json
       - name: Install dependencies
         working-directory: opentelemetry-util-genai
-        run: npm ci
+        run: |
+          npm ci
+          npm pkg set 'devDependencies.@opentelemetry/sdk-trace-base=${{ matrix.otel-version }}'
+          npm pkg set 'devDependencies.@opentelemetry/sdk-metrics=${{ matrix.otel-version }}'
+          npm install --ignore-scripts --package-lock=false
+          npm ls @opentelemetry/sdk-trace-base @opentelemetry/sdk-metrics
       - name: Security audit
         working-directory: opentelemetry-util-genai
         run: npm audit --audit-level=high --registry=https://registry.npmjs.org
@@ -83,6 +89,21 @@ jobs:
       - name: Run tests
         working-directory: opentelemetry-util-genai
         run: npm test
+      - name: Verify packed SDK installs cleanly
+        working-directory: opentelemetry-util-genai
+        run: |
+          PACKAGE_DIR=$(pwd)
+          PACK_FILE=$(npm pack --ignore-scripts --json | node -e 'let data = ""; process.stdin.on("data", chunk => data += chunk).on("end", () => console.log(JSON.parse(data)[0].filename))')
+          CONSUMER_DIR=$(mktemp -d)
+          cd "$CONSUMER_DIR"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund "$PACKAGE_DIR/$PACK_FILE" \
+            @opentelemetry/api@1.9.0 \
+            "@opentelemetry/resources@${{ matrix.otel-version }}" \
+            "@opentelemetry/sdk-metrics@${{ matrix.otel-version }}" \
+            "@opentelemetry/sdk-trace-base@${{ matrix.otel-version }}"
+          npm ls @loongsuite/otel-util-genai @opentelemetry/sdk-trace-base \
+            @opentelemetry/sdk-metrics @opentelemetry/resources
 
   test-util-genai-demo:
     name: Test opentelemetry-util-genai Node.js demo
