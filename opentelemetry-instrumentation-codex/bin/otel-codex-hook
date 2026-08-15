@@ -1,0 +1,98 @@
+#!/usr/bin/env node
+// Copyright 2026 Alibaba Group Holding Limited
+// SPDX-License-Identifier: Apache-2.0
+
+// Prevent other instrumentation preloads (e.g. Claude plugin's intercept.js)
+// from crashing this process. Only affects this subprocess, not the parent.
+delete process.env.NODE_OPTIONS;
+
+"use strict";
+
+
+const { Command } = require("commander");
+const {
+  cmdSessionStart,
+  cmdUserPromptSubmit,
+  cmdPreToolUse,
+  cmdPostToolUse,
+  cmdStop,
+  cmdInstall,
+  cmdUninstall,
+  cmdShowConfig,
+  cmdCheckEnv,
+} = require("../dist/cli.js");
+
+const program = new Command();
+
+program
+  .name("otel-codex-hook")
+  .description("Codex CLI hook commands for OpenTelemetry tracing")
+  .version(require("../package.json").version);
+
+program
+  .command("session-start")
+  .description("Handle SessionStart hook — initialize session state")
+  .action(() => { cmdSessionStart(); });
+
+program
+  .command("user-prompt-submit")
+  .description("Handle UserPromptSubmit hook — record user prompt event")
+  .action(() => { cmdUserPromptSubmit(); });
+
+program
+  .command("pre-tool-use")
+  .description("Handle PreToolUse hook — record tool-start event")
+  .action(() => { cmdPreToolUse(); });
+
+program
+  .command("post-tool-use")
+  .description("Handle PostToolUse hook — record tool-completion event")
+  .action(() => { cmdPostToolUse(); });
+
+program
+  .command("stop")
+  .description("Handle Stop hook — export complete OTel traces for this session")
+  .action(async () => {
+    try {
+      await cmdStop();
+    } catch (err) {
+      process.stderr.write(
+        "[otel-codex-hook] stop failed (telemetry error, agent unaffected): " +
+        (err?.message || String(err)) + "\n"
+      );
+    }
+  });
+
+program
+  .command("install")
+  .description("Add otel-codex-hook hooks to ~/.codex/config.toml")
+  .option("--quiet", "Silent mode for postinstall use")
+  .action(async (opts) => {
+    try {
+      await cmdInstall(opts);
+    } catch (err) {
+      process.stderr.write("[otel-codex-hook] install failed: " + (err?.message || String(err)) + "\n");
+      process.exit(1);
+    }
+  });
+
+program
+  .command("uninstall")
+  .description("Remove hooks from ~/.codex/config.toml")
+  .option("--purge", "Also delete the cache directory")
+  .action((opts) => { cmdUninstall(opts); });
+
+program
+  .command("show-config")
+  .description("Print the hook configuration to add manually")
+  .action(() => { cmdShowConfig(); });
+
+program
+  .command("check-env")
+  .description("Check telemetry backend configuration status")
+  .action(() => { cmdCheckEnv(); });
+
+program.parseAsync(process.argv).catch((err) => {
+  process.stderr.write("[otel-codex-hook] error: " + (err?.message || String(err)) + "\n");
+  process.exit(1);
+});
