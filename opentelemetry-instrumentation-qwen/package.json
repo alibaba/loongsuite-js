@@ -1,0 +1,81 @@
+{
+  "name": "@loongsuite/opentelemetry-instrumentation-qwen",
+  "version": "0.1.0",
+  "description": "OpenTelemetry instrumentation for Qwen Code — hooks + intercept.js LLM call tracing",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alibaba/loongsuite-js-plugins.git",
+    "directory": "opentelemetry-instrumentation-qwen"
+  },
+  "homepage": "https://github.com/alibaba/loongsuite-js-plugins/tree/main/opentelemetry-instrumentation-qwen#readme",
+  "bugs": {
+    "url": "https://github.com/alibaba/loongsuite-js-plugins/issues"
+  },
+  "keywords": [
+    "opentelemetry",
+    "otel",
+    "qwen",
+    "qwen-code",
+    "ai-agent",
+    "llm",
+    "observability",
+    "tracing",
+    "instrumentation",
+    "loongsuite"
+  ],
+  "main": "src/index.js",
+  "bin": {
+    "otel-qwen-hook": "bin/otel-qwen-hook"
+  },
+  "scripts": {
+    "test": "jest --coverage",
+    "test:watch": "jest --watch",
+    "install-hooks": "node bin/otel-qwen-hook install --user"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "src/**/*.js"
+    ],
+    "coverageThreshold": {
+      "./src/cli.js": {
+        "lines": 45,
+        "branches": 30
+      },
+      "./src/hooks.js": {
+        "lines": 65
+      },
+      "./src/intercept.js": {
+        "lines": 20,
+        "branches": 15
+      },
+      "./src/state.js": {
+        "lines": 80
+      },
+      "./src/telemetry.js": {
+        "lines": 55
+      }
+    }
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+    "@opentelemetry/resources": "^1.30.0",
+    "@opentelemetry/sdk-trace-node": "^1.30.0",
+    "@opentelemetry/semantic-conventions": "^1.30.0",
+    "commander": "^12.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "scripts/",
+    "README.md"
+  ]
+}

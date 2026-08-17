@@ -1,0 +1,160 @@
+#!/usr/bin/env node
+// Copyright 2026 Alibaba Group Holding Limited
+// SPDX-License-Identifier: Apache-2.0
+
+"use strict";
+
+/**
+ * otel-qwen-hook — CLI entry point.
+ *
+ * Usage:
+ *   otel-qwen-hook user-prompt-submit  (stdin: JSON from Qwen Code hook)
+ *   otel-qwen-hook session-start
+ *   otel-qwen-hook pre-tool-use
+ *   otel-qwen-hook post-tool-use
+ *   otel-qwen-hook post-tool-use-failure
+ *   otel-qwen-hook stop
+ *   otel-qwen-hook pre-compact
+ *   otel-qwen-hook post-compact
+ *   otel-qwen-hook subagent-start
+ *   otel-qwen-hook subagent-stop
+ *   otel-qwen-hook session-end
+ *   otel-qwen-hook notification
+ *   otel-qwen-hook install [--user] [--project]
+ *   otel-qwen-hook uninstall [--purge]
+ *   otel-qwen-hook show-config
+ *   otel-qwen-hook check-env
+ */
+
+const { Command } = require("commander");
+const {
+  cmdUserPromptSubmit,
+  cmdSessionStart,
+  cmdPreToolUse,
+  cmdPostToolUse,
+  cmdPostToolUseFailure,
+  cmdPreCompact,
+  cmdPostCompact,
+  cmdSubagentStart,
+  cmdSubagentStop,
+  cmdSessionEnd,
+  cmdNotification,
+  cmdStop,
+  cmdInstall,
+  cmdUninstall,
+  cmdShowConfig,
+  cmdCheckEnv,
+} = require("../src/cli");
+
+const program = new Command();
+
+program
+  .name("otel-qwen-hook")
+  .description("Qwen Code settings.json hook commands for OpenTelemetry tracing")
+  .version(require("../package.json").version);
+
+program
+  .command("user-prompt-submit")
+  .description("Handle UserPromptSubmit hook — initialize session state")
+  .action(() => { cmdUserPromptSubmit(); });
+
+program
+  .command("session-start")
+  .description("Handle SessionStart hook — record model and session metadata")
+  .action(() => { cmdSessionStart(); });
+
+program
+  .command("pre-tool-use")
+  .description("Handle PreToolUse hook — record tool-start event")
+  .action(() => { cmdPreToolUse(); });
+
+program
+  .command("post-tool-use")
+  .description("Handle PostToolUse hook — record tool-completion event")
+  .action(() => { cmdPostToolUse(); });
+
+program
+  .command("post-tool-use-failure")
+  .description("Handle PostToolUseFailure hook — record tool failure event")
+  .action(() => { cmdPostToolUseFailure(); });
+
+program
+  .command("pre-compact")
+  .description("Handle PreCompact hook — record context-compaction start")
+  .action(() => { cmdPreCompact(); });
+
+program
+  .command("post-compact")
+  .description("Handle PostCompact hook — record context-compaction completion")
+  .action(() => { cmdPostCompact(); });
+
+program
+  .command("subagent-start")
+  .description("Handle SubagentStart hook — record subagent launch")
+  .action(() => { cmdSubagentStart(); });
+
+program
+  .command("subagent-stop")
+  .description("Handle SubagentStop hook — record subagent completion (with child state snapshot)")
+  .action(() => { cmdSubagentStop(); });
+
+program
+  .command("session-end")
+  .description("Handle SessionEnd hook — record session termination")
+  .action(() => { cmdSessionEnd(); });
+
+program
+  .command("notification")
+  .description("Handle Notification hook — record notification event")
+  .action(() => { cmdNotification(); });
+
+program
+  .command("stop")
+  .description("Handle Stop hook — export complete OTel trace for this session")
+  .action(async () => {
+    try {
+      await cmdStop();
+    } catch (err) {
+      console.error("[otel-qwen-hook] stop failed (telemetry error, agent unaffected):", err?.message || String(err));
+    }
+  });
+
+program
+  .command("install")
+  .description("Add otel-qwen-hook hooks to .qwen/settings.json")
+  .option("--user", "Install into user-level settings (~/.qwen/settings.json)", true)
+  .option("--no-user", "Skip user-level settings")
+  .option("--project", "Install into project-level settings (.qwen/settings.json)")
+  .option("--quiet", "Silent mode: warn on error instead of exiting (for postinstall use)")
+  .action(async (opts) => {
+    try {
+      await cmdInstall(opts);
+    } catch (err) {
+      console.error("[otel-qwen-hook] install failed:", err?.message || String(err));
+      process.exit(1);
+    }
+  });
+
+program
+  .command("uninstall")
+  .description("Remove hooks, intercept.js, and the qwen shell alias")
+  .option("--user", "Remove from user-level settings (~/.qwen/settings.json)", true)
+  .option("--no-user", "Skip user-level settings")
+  .option("--project", "Remove from project-level settings (.qwen/settings.json)")
+  .option("--purge", "Also delete the entire cache directory (including session data)")
+  .action((opts) => { cmdUninstall(opts); });
+
+program
+  .command("show-config")
+  .description("Print the JSON snippet to add to .qwen/settings.json")
+  .action(() => { cmdShowConfig(); });
+
+program
+  .command("check-env")
+  .description("Check that a telemetry backend is configured and print its status")
+  .action(() => { cmdCheckEnv(); });
+
+program.parseAsync(process.argv).catch((err) => {
+  console.error("[otel-qwen-hook] error:", err?.message || String(err));
+  process.exit(1);
+});
