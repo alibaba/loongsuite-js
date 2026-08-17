@@ -1,0 +1,67 @@
+{
+  "name": "@loongsuite/opentelemetry-instrumentation-qodercli",
+  "version": "0.1.0",
+  "description": "OpenTelemetry instrumentation for Qoder CLI — hook-driven session/turn/tool/LLM tracing with ARMS GenAI semconv",
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alibaba/loongsuite-js-plugins.git",
+    "directory": "opentelemetry-instrumentation-qodercli"
+  },
+  "homepage": "https://github.com/alibaba/loongsuite-js-plugins/tree/main/opentelemetry-instrumentation-qodercli#readme",
+  "bugs": {
+    "url": "https://github.com/alibaba/loongsuite-js-plugins/issues"
+  },
+  "keywords": [
+    "opentelemetry",
+    "otel",
+    "qoder",
+    "qodercli",
+    "ai-agent",
+    "llm",
+    "observability",
+    "tracing",
+    "instrumentation",
+    "loongsuite"
+  ],
+  "bin": {
+    "otel-qodercli-hook": "bin/otel-qodercli-hook"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "scripts/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "pack:tarball": "bash scripts/pack.sh",
+    "postinstall": "node bin/otel-qodercli-hook install --user --quiet || true"
+  },
+  "dependencies": {
+    "@loongsuite/opentelemetry-util-genai": "^0.1.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.212.0",
+    "@opentelemetry/resources": "^2.5.1",
+    "@opentelemetry/sdk-trace-base": "^2.5.1",
+    "@opentelemetry/sdk-trace-node": "^2.5.1",
+    "@opentelemetry/semantic-conventions": "^1.40.0",
+    "commander": "^14.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^4.1.3",
+    "typescript": "^5.0.0",
+    "vitest": "^4.1.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

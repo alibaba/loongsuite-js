@@ -1,0 +1,79 @@
+{
+  "feature_id": "100-instrumentation-qodercli",
+  "skill": "auto-dev-otel-plugin",
+  "skill_version": "0.1.0",
+  "phase": "done",
+  "phases_completed": ["spec_elicit", "plan_and_tasks", "implement", "verify", "push_pr"],
+  "current_task": null,
+  "retry_budget": { "used": 0, "limit": 3 },
+  "verification": {
+    "typecheck": { "status": "PASS", "ran_at": "2026-05-15T04:02:00Z" },
+    "build":     { "status": "PASS", "ran_at": "2026-05-15T04:02:00Z" },
+    "unit":      { "status": "PASS", "ran_at": "2026-05-15T04:02:00Z", "tests": 35 },
+    "e2e":       { "status": "PASS", "ran_at": "2026-05-15T04:02:00Z", "passed_assertions": 7 },
+    "arms":      {
+      "status": "PASS",
+      "ran_at": "2026-05-15T06:30:00Z",
+      "trace_id": "552f0aa2797b1ba94cb256c1e63fd7a7",
+      "service_name": "qodercli-agent-v5timing",
+      "pid": "hwx28v3j7p@0eb96ca651a7092",
+      "spans": 7,
+      "by_kind": { "ENTRY": 1, "AGENT": 1, "STEP": 2, "LLM": 2, "TOOL": 1 },
+      "missing_attrs": 0,
+      "durations_ms": {
+        "entry": 12534,
+        "agent": 12534,
+        "step_1": 9350,
+        "step_2": 2838,
+        "llm_1": 6574,
+        "llm_2": 2838,
+        "tool_bash": 2776
+      },
+      "prior_traces": [
+        { "trace_id": "136c9595376f0724a9ad051bc85f54ad", "note": "had attrs PASS but LLM duration bug (1ms each)" }
+      ]
+    }
+  },
+  "pr": {
+    "url": "https://github.com/alibaba/loongsuite-js-plugins/pull/46",
+    "number": 46,
+    "state": "open",
+    "head": "fangxiu-wf:feat/instrumentation-qoder",
+    "base": "alibaba/loongsuite-js-plugins:main",
+    "commit": "78a8e09"
+  },
+  "user_inputs": {
+    "agent_short_name": "qodercli",
+    "npm_package": "@loongsuite/opentelemetry-instrumentation-qodercli",
+    "cli_bin": "otel-qodercli-hook",
+    "debug_env": "QODERCLI_TELEMETRY_DEBUG",
+    "data_source": "transcript",
+    "transcript_path_template": "~/.qoder/projects/{slugified-cwd}/{session_id}.jsonl",
+    "transcript_subagent_path_template": "~/.qoder/projects/{slugified-cwd}/{session_id}/subagents/{subagent_id}.jsonl",
+    "transcript_format": "JSONL,fields=type|uuid|timestamp|parentUuid|sessionId|cwd|message{role,model,id,usage,stop_reason,content[]}; assistant chunks share message.id",
+    "arms_endpoint": "https://proj-xtrace-ee483ec157740929c4cb92d4ff85f-cn-hongkong.cn-hongkong.log.aliyuncs.com/apm/trace/opentelemetry",
+    "arms_headers": "x-arms-license-key=hwx28v3j7p@672218fb660eec3,x-arms-project=proj-xtrace-ee483ec157740929c4cb92d4ff85f-cn-hongkong,x-cms-workspace=default-cms-1819385687343877-cn-hongkong",
+    "span_tree_strategy": "per-turn",
+    "hook_events_to_subscribe": [
+      "SessionStart",
+      "UserPromptSubmit",
+      "PreToolUse",
+      "PostToolUse",
+      "PostToolUseFailure",
+      "Stop",
+      "SubagentStart",
+      "SubagentStop",
+      "PreCompact",
+      "Notification",
+      "SessionEnd"
+    ],
+    "hook_config_path_user": "~/.qoder/settings.json",
+    "hook_config_path_project": "${project}/.qoder/settings.json",
+    "hook_config_path_project_local": "${project}/.qoder/settings.local.json",
+    "agent_system_id": "qodercli",
+    "default_service_name": "qodercli-agent",
+    "skip_T25_trust": true
+  },
+  "created_at": "2026-05-15T03:33:23Z",
+  "updated_at": "2026-05-15T04:20:00Z"
+}

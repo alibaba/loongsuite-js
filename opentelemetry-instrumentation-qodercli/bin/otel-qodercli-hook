@@ -1,0 +1,14 @@
+#!/usr/bin/env node
+// Copyright 2026 Alibaba Group Holding Limited
+// SPDX-License-Identifier: Apache-2.0
+"use strict";
+const path = require("path");
+const fs = require("fs");
+
+const distCli = path.join(__dirname, "..", "dist", "cli.js");
+if (!fs.existsSync(distCli)) {
+  // Build hasn't run yet (e.g. during initial `npm install --ignore-scripts`).
+  // Exit 0 so that postinstall hooks don't break the install pipeline.
+  process.exit(0);
+}
+require(distCli);
