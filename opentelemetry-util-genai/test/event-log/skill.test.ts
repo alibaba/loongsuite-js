@@ -278,6 +278,17 @@ describe("Skill attributes in converted TOOL spans", () => {
     }
   });
 
+  it("detects escaped Windows Skill paths in freeform JavaScript arguments", async () => {
+    const freeformArguments = String.raw`const r = await tools.exec_command({ cmd: "Get-Content -Raw 'C:\\Users\\u\\.codex\\skills\\windows-data-analysis\\SKILL.md'", workdir: "D:\\workspace\\demo" }); text(r.output);`;
+    const { spans } = await convertEventLogToReadableSpans(
+      toolTurn("functions.exec", freeformArguments),
+    );
+
+    const tool = toolSpan(spans);
+    expect(tool.attributes[GEN_AI_SKILL_NAME]).toBe("windows-data-analysis");
+    expect(tool.attributes[GEN_AI_SKILL_ID]).toBe("windows-data-analysis");
+  });
+
   it("skillDetection=false disables inference but keeps explicit event fields", async () => {
     const inferred = await convertEventLogToReadableSpans(
       toolTurn("Skill", { skill: "auto" }),
