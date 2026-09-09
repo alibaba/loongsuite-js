@@ -45,7 +45,7 @@ const PATH_KEYS = [
 ] as const;
 
 const SKILL_PATH_PATTERN =
-  /(?:^|[/\\])skills(?:-[A-Za-z0-9][A-Za-z0-9_-]*)?[/\\](?:\.system[/\\])?([^/\\"'\s]+)(?=[/\\]|["'\s]|$)/;
+  /(?:^|[/\\]+)skills(?:-[A-Za-z0-9][A-Za-z0-9_-]*)?[/\\]+(?:\.system[/\\]+)?([^/\\"'\s]+)(?=[/\\]|["'\s]|$)/;
 
 interface NormalizedSkillDetection {
   enabled: boolean;
