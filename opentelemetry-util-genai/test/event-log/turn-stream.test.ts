@@ -412,11 +412,11 @@ describe("TurnStreamSession", () => {
     });
   });
 
-  it("links ENTRY to upstream parent_span_id from an 'other' event (fragmented)", async () => {
+  it("links ENTRY to upstream parent_span_id from agent.input (fragmented)", async () => {
     const TRACE_ID = "b".repeat(32);
     const PARENT_SPAN_ID = "cafebabecafebabe";
-    const otherEvt: EventLogRecord = {
-      time_unix_nano: "1780000000500000000", "event.id": "user-input", "event.name": EventName.OTHER,
+    const agentInput: EventLogRecord = {
+      time_unix_nano: "1780000000500000000", "event.id": "user-input", "event.name": EventName.AGENT_INPUT,
       trace_id: TRACE_ID, parent_span_id: PARENT_SPAN_ID,
       "gen_ai.session.id": "s", "gen_ai.turn.id": "s:t1", "user.id": "u", "gen_ai.agent.type": "demo",
       "gen_ai.input.messages_delta": '[{"role":"user","parts":[{"type":"text","content":"hi"}]}]',
@@ -434,11 +434,63 @@ describe("TurnStreamSession", () => {
       "gen_ai.agent.type": "demo", "gen_ai.provider.name": "qwen", "gen_ai.request.model": "qwen-max",
       "gen_ai.response.finish_reasons": ["stop"], "gen_ai.usage.input_tokens": 10, "gen_ai.usage.output_tokens": 5,
     };
-    // Fragmented: 'other' marker, then request, then response in separate pushes.
-    const { spans } = await runStream([[otherEvt], [req], [resp]]);
+    // Fragmented: agent.input marker, then request, then response in separate pushes.
+    const { spans } = await runStream([[agentInput], [req], [resp]]);
     const entry = spanOf(spans, GenAiSpanKindValues.ENTRY);
     expect(getReadableSpanParentId(entry)).toBe(PARENT_SPAN_ID); // NOT synthetic, NOT intra-trace noise
     for (const s of spans) expect(s.spanContext().traceId).toBe(TRACE_ID);
+  });
+
+  it("ignores dual-written other input and does not create an empty STEP", async () => {
+    const TRACE_ID = "9".repeat(32);
+    const base = {
+      trace_id: TRACE_ID,
+      "gen_ai.session.id": "s",
+      "gen_ai.turn.id": "s:t1",
+      "user.id": "u",
+      "gen_ai.agent.type": "demo",
+    };
+    const otherInput: EventLogRecord = {
+      ...base,
+      time_unix_nano: "1780000000000000000",
+      "event.id": "legacy-other",
+      "event.name": EventName.OTHER,
+      "gen_ai.input.messages_delta": '[{"role":"user","parts":[{"type":"text","content":"legacy"}]}]',
+    };
+    const agentInput: EventLogRecord = {
+      ...base,
+      time_unix_nano: "1780000000000000000",
+      "event.id": "canonical-input",
+      "event.name": EventName.AGENT_INPUT,
+      "gen_ai.input.messages_delta": '[{"role":"user","parts":[{"type":"text","content":"canonical"}]}]',
+    };
+    const req: EventLogRecord = {
+      ...base,
+      time_unix_nano: "1780000001000000000",
+      "event.id": "req",
+      "event.name": EventName.LLM_REQUEST,
+      "gen_ai.step.id": "s:t1:s1",
+      "gen_ai.request.model": "qwen-max",
+    };
+    const resp: EventLogRecord = {
+      ...base,
+      time_unix_nano: "1780000002000000000",
+      "event.id": "resp",
+      "event.name": EventName.LLM_RESPONSE,
+      "gen_ai.step.id": "s:t1:s1",
+      "gen_ai.request.model": "qwen-max",
+      "gen_ai.usage.input_tokens": 1,
+      "gen_ai.usage.output_tokens": 1,
+    };
+
+    const { spans } = await runStream([[otherInput], [agentInput], [req], [resp]]);
+    expect(byKind(spans, GenAiSpanKindValues.STEP)).toHaveLength(1);
+    expect(spans).toHaveLength(4);
+    const messages = JSON.parse(
+      spanOf(spans, GenAiSpanKindValues.ENTRY).attributes[GEN_AI_INPUT_MESSAGES] as string,
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].parts[0].content).toBe("canonical");
   });
 
   it("resolves trace_id even when the first parent record lacks it", async () => {

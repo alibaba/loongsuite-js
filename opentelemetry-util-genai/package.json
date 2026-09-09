@@ -1,6 +1,6 @@
 {
   "name": "@loongsuite/otel-util-genai",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "OpenTelemetry GenAI utility for standardized telemetry collection across LLM, Agent, Embedding, Tool, Retrieval, Rerank, Memory and more",
   "type": "module",
   "license": "Apache-2.0",

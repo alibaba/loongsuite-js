@@ -31,6 +31,7 @@ export const EventName = {
   TOOL_RESULT: "tool.result",
   SKILL_USE: "skill.use",
   TOOL_APPROVE: "tool.approve",
+  AGENT_INPUT: "agent.input",
   OTHER: "other",
 } as const;
 

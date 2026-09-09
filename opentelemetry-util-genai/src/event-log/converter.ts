@@ -119,35 +119,43 @@ function convertTurn(
   const allRecords = turn.records;
   if (allRecords.length === 0) return 0;
 
-  // Time bounds use ALL records (including user-hook events) so ENTRY/AGENT
-  // span timestamps still cover the full turn even though user-hook events
-  // are removed from pairing/grouping.
+  // Time bounds use ALL records (including agent-input and legacy user-hook
+  // events) so ENTRY/AGENT span timestamps still cover the full turn even
+  // though non-span events are removed from pairing/grouping.
   const turnStartMs = minTime(allRecords);
   const turnEndMs = maxTime(allRecords);
 
-  // Extract user-input events that feed ENTRY span's input.messages but do
-  // NOT generate their own LLM/TOOL spans. Two sources:
+  // Extract user-input events that feed ENTRY/AGENT input.messages but do NOT
+  // generate their own STEP/LLM/TOOL spans. Two sources:
   //
-  // 1. event.name = "other" events carrying gen_ai.input.messages or _delta
-  //    (做法 A — recommended, per EVENT_LOG_TO_TRACE_SPEC.md §5)
-  // 2. Legacy "user-hook" llm.request events (做法 B — deprecated):
+  // 1. event.name = "agent.input" events carrying gen_ai.input.messages or
+  //    gen_ai.input.messages_delta (the canonical source)
+  // 2. Legacy "user-hook" llm.request events (deprecated):
   //    rule: no step.id, no model, no matching llm.response in turn
-  // All "other" events are removed from pairing/grouping: those with input
-  // messages feed ENTRY, those without are silently discarded.
-  const otherWithMessages = allRecords.filter(
-    (r) => r["event.name"] === EventName.OTHER && (r["gen_ai.input.messages_delta"] || r["gen_ai.input.messages"]),
+  // agent.input and other are both non-span events and are removed from
+  // pairing/grouping. Unlike agent.input, other never supplies user input.
+  const agentInputEvents = allRecords.filter(
+    (r) =>
+      r["event.name"] === EventName.AGENT_INPUT &&
+      (r["gen_ai.input.messages_delta"] || r["gen_ai.input.messages"]),
   );
-  const afterOther = allRecords.filter((r) => r["event.name"] !== EventName.OTHER);
+  const afterNonSpanEvents = allRecords.filter(
+    (r) =>
+      r["event.name"] !== EventName.AGENT_INPUT &&
+      r["event.name"] !== EventName.OTHER,
+  );
 
-  const { userHooks, remaining } = partitionUserHookRequests(afterOther);
+  const { userHooks, remaining } = partitionUserHookRequests(afterNonSpanEvents);
   const records = remaining;
 
-  // Combine both sources as user-input events (other events take priority)
-  const allUserInputEvents = [...otherWithMessages, ...userHooks];
+  // Canonical agent.input events take priority; legacy user-hooks are only a
+  // fallback when the turn has no dedicated input event.
+  const allUserInputEvents =
+    agentInputEvents.length > 0 ? agentInputEvents : userHooks;
 
   if (userHooks.length > 0) {
     warnings.push(
-      `Treated ${userHooks.length} llm.request event(s) as user-hook prompt(s), merged into ENTRY (turn ${turn.turnId ?? "(no turn.id)"}). Consider migrating to event.name="other" (做法 A).`,
+      `Treated ${userHooks.length} llm.request event(s) as user-hook prompt(s), merged into ENTRY (turn ${turn.turnId ?? "(no turn.id)"}). Consider migrating to event.name="agent.input".`,
     );
   }
 

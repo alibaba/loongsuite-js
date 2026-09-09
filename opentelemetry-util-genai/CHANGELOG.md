@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.2 (2026-09-09)
+
+### Breaking Changes
+
+- Event Log → Trace 转换以 `event.name="agent.input"` 作为 ENTRY/AGENT
+  用户输入和 turn 级上游 `parent_span_id` 的唯一专用事件；`other` 不再承载
+  这些结构语义，仅作为不生成 span 的普通元数据丢弃。缺 step/model 且无响应的
+  legacy `llm.request` user-hook 兜底暂时保留。
+
 ## 0.1.1 (2026-08-15)
 
 ### Compatibility

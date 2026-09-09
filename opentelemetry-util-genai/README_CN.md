@@ -7,7 +7,7 @@
 ## 安装
 
 ```bash
-npm install @loongsuite/otel-util-genai@0.1.1
+npm install @loongsuite/otel-util-genai@0.1.2
 ```
 
 ## 功能特性

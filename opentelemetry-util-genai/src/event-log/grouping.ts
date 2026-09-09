@@ -154,12 +154,11 @@ export function groupByTurn(
       }
     }
 
-    // parent_span_id: only read from event.name="other" events (做法 A user-input
-    // markers). Other event types (llm.request/response, tool.call/result) use
-    // parent_span_id for intra-trace span-tree parent pointers (LLM→STEP etc),
-    // which are naturally different per event and must NOT be treated as the
-    // turn-level upstream traceparent parent.
-    if (record["event.name"] === "other") {
+    // parent_span_id: only read from event.name="agent.input" events. Other
+    // event types (including generic "other", llm.request/response, and
+    // tool.call/result) may carry unrelated parent pointers and must NOT be
+    // treated as the turn-level upstream traceparent parent.
+    if (record["event.name"] === EventName.AGENT_INPUT) {
       const spanCandidate = record["parent_span_id"];
       if (isValidSpanId(spanCandidate)) {
         if (group.parentSpanId === undefined) {

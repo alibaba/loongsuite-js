@@ -56,9 +56,9 @@ function asString(value: unknown): string | undefined {
  */
 export function resolveTurnAgentName(
   turnRecords: EventLogRecord[],
-  userHookRecords: EventLogRecord[] = [],
+  inputEventRecords: EventLogRecord[] = [],
 ): string | undefined {
-  for (const r of [...turnRecords, ...userHookRecords]) {
+  for (const r of [...turnRecords, ...inputEventRecords]) {
     const v =
       asString(r["gen_ai.agent.name"]) ?? asString(r["gen_ai.agent.type"]);
     if (v) return v;
@@ -69,9 +69,9 @@ export function resolveTurnAgentName(
 /** Resolve the user.id for a turn (first non-empty `user.id` field). */
 export function resolveTurnUserId(
   turnRecords: EventLogRecord[],
-  userHookRecords: EventLogRecord[] = [],
+  inputEventRecords: EventLogRecord[] = [],
 ): string | undefined {
-  for (const r of [...turnRecords, ...userHookRecords]) {
+  for (const r of [...turnRecords, ...inputEventRecords]) {
     const v = asString(r["user.id"]);
     if (v) return v;
   }
@@ -81,9 +81,9 @@ export function resolveTurnUserId(
 /** Resolve the session.id for a turn (first non-empty `gen_ai.session.id`). */
 export function resolveTurnSessionId(
   turnRecords: EventLogRecord[],
-  userHookRecords: EventLogRecord[] = [],
+  inputEventRecords: EventLogRecord[] = [],
 ): string | undefined {
-  for (const r of [...turnRecords, ...userHookRecords]) {
+  for (const r of [...turnRecords, ...inputEventRecords]) {
     const v = asString(r["gen_ai.session.id"]);
     if (v) return v;
   }
@@ -294,15 +294,14 @@ export function buildAccumulatedInputMessages(
 const DEFAULT_PROVIDER = "unknown";
 
 /**
- * Collect input messages from user-hook events (events that look like
- * llm.request but actually mark "user prompt submitted"). Returns them in
- * time order. Used by ENTRY/AGENT builders when user-hook events exist.
+ * Collect messages from dedicated agent.input events or the legacy user-hook
+ * fallback. Returns them in time order for ENTRY/AGENT builders.
  */
-function collectUserHookInputMessages(
-  userHookRecords: EventLogRecord[],
+function collectInputEventMessages(
+  inputEventRecords: EventLogRecord[],
 ): InputMessage[] {
-  if (userHookRecords.length === 0) return [];
-  const sorted = [...userHookRecords].sort(
+  if (inputEventRecords.length === 0) return [];
+  const sorted = [...inputEventRecords].sort(
     (a, b) => readNanoMs(a["time_unix_nano"]) - readNanoMs(b["time_unix_nano"]),
   );
   const out: InputMessage[] = [];
@@ -318,26 +317,25 @@ function collectUserHookInputMessages(
 /**
  * Build an EntryInvocation from a turn's records.
  *
- * @param turnRecords  records remaining after user-hook events are removed
- * @param userHookRecords  events identified as user-input hook prompts;
- *                         their messages_delta becomes the ENTRY input.
- *                         If empty, falls back to the first real llm.request.
+ * @param turnRecords records remaining after non-span input events are removed
+ * @param inputEventRecords dedicated agent.input events, or legacy user-hook
+ *                          fallback records when no agent.input exists. If
+ *                          empty, uses the first real llm.request.
  */
 export function buildEntryInvocation(
   turnRecords: EventLogRecord[],
-  userHookRecords: EventLogRecord[] = [],
+  inputEventRecords: EventLogRecord[] = [],
   common?: TurnCommon,
 ): EntryInvocation {
-  const first = turnRecords[0] ?? userHookRecords[0];
+  const first = turnRecords[0] ?? inputEventRecords[0];
   const sessionId =
     common?.sessionId ?? (first ? asString(first["gen_ai.session.id"]) : undefined);
   const userId =
     common?.userId ?? (first ? asString(first["user.id"]) : undefined);
 
-  // Prefer user-hook events as the authoritative source of user input;
-  // fall back to the first llm.request's messages_delta only if no
-  // user-hook event exists.
-  let inputMessages = collectUserHookInputMessages(userHookRecords);
+  // Prefer explicit input events; fall back to the first llm.request's
+  // messages_delta only when no input event exists.
+  let inputMessages = collectInputEventMessages(inputEventRecords);
   if (inputMessages.length === 0) {
     const llmReq = turnRecords.find((r) => r["event.name"] === EventName.LLM_REQUEST);
     if (llmReq) {
@@ -447,10 +445,10 @@ export function usageFieldsFromAcc(acc: ResponseUsageAcc): {
 /** Build an InvokeAgentInvocation by aggregating turn-level metadata. */
 export function buildInvokeAgentInvocation(
   turnRecords: EventLogRecord[],
-  userHookRecords: EventLogRecord[] = [],
+  inputEventRecords: EventLogRecord[] = [],
   common?: TurnCommon,
 ): InvokeAgentInvocation {
-  const first = turnRecords[0] ?? userHookRecords[0] ?? {};
+  const first = turnRecords[0] ?? inputEventRecords[0] ?? {};
 
   const provider = asString(first["gen_ai.provider.name"]) ?? DEFAULT_PROVIDER;
   const requestModel =
@@ -470,8 +468,8 @@ export function buildInvokeAgentInvocation(
     .reverse()
     .find((r) => r["event.name"] === EventName.LLM_RESPONSE);
 
-  // Prefer user-hook events for input.messages (same rule as ENTRY).
-  let inputMessages = collectUserHookInputMessages(userHookRecords);
+  // Prefer explicit input events for input.messages (same rule as ENTRY).
+  let inputMessages = collectInputEventMessages(inputEventRecords);
   if (inputMessages.length === 0) {
     inputMessages =
       (llmReq && parseInputMessages(llmReq["gen_ai.input.messages_delta"])) ?? [];
