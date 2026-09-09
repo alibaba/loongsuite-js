@@ -7,7 +7,7 @@ This is the Node.js equivalent of the Python `opentelemetry-util-genai` package,
 ## Installation
 
 ```bash
-npm install @loongsuite/otel-util-genai@0.1.1
+npm install @loongsuite/otel-util-genai@0.1.2
 ```
 
 ## Features
@@ -286,6 +286,10 @@ The optional peer supports `@opentelemetry/sdk-trace-base` 1.30.x and
   `gen_ai.step.id` (one STEP span per step).
 - Each `llm.request` + `llm.response` pair becomes one LLM span; each
   `tool.call` + `tool.result` pair becomes one TOOL span.
+- `event.name="agent.input"` is the canonical source for ENTRY/AGENT input
+  messages and the turn-level upstream `parent_span_id`. It does not create a
+  span of its own. Generic `event.name="other"` records are ignored by the
+  trace-tree conversion.
 - `trace_id` on the records is honored — generated spans inherit it via a
   synthetic parent context. If `trace_id` is missing the SDK allocates one.
 - `gen_ai.input.messages_delta` is accumulated across the whole turn to

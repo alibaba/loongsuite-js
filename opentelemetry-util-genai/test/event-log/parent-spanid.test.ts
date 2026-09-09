@@ -80,20 +80,21 @@ describe("createTraceParentContext with parentSpanId", () => {
 });
 
 describe("groupByTurn parent_span_id", () => {
-  it("extracts valid parent_span_id from event.name=other", () => {
+  it("extracts valid parent_span_id from event.name=agent.input", () => {
     const warnings: string[] = [];
     const groups = groupByTurn(
-      [{ "event.name": EventName.OTHER, "gen_ai.turn.id": "t1", trace_id: "a".repeat(32), parent_span_id: "cafebabecafebabe" } as EventLogRecord],
+      [{ "event.name": EventName.AGENT_INPUT, "gen_ai.turn.id": "t1", trace_id: "a".repeat(32), parent_span_id: "cafebabecafebabe" } as EventLogRecord],
       warnings,
     );
     expect(groups[0]!.parentSpanId).toBe("cafebabecafebabe");
     expect(warnings).toHaveLength(0);
   });
 
-  it("ignores parent_span_id on non-other events (intra-trace noise)", () => {
+  it("ignores parent_span_id on non-agent.input events", () => {
     const warnings: string[] = [];
     const groups = groupByTurn(
       [
+        { "event.name": EventName.OTHER, "gen_ai.turn.id": "t1", parent_span_id: "0123456789abcdef" } as EventLogRecord,
         { "event.name": EventName.LLM_REQUEST, "gen_ai.turn.id": "t1", parent_span_id: "cafebabecafebabe" } as EventLogRecord,
         { "event.name": EventName.LLM_RESPONSE, "gen_ai.turn.id": "t1", parent_span_id: "deadbeefdeadbeef" } as EventLogRecord,
       ],
@@ -103,12 +104,12 @@ describe("groupByTurn parent_span_id", () => {
     expect(warnings.filter((w) => w.includes("parent_span_id"))).toHaveLength(0);
   });
 
-  it("first valid wins from other events, warns on inconsistent", () => {
+  it("first valid wins from agent.input events, warns on inconsistent", () => {
     const warnings: string[] = [];
     const groups = groupByTurn(
       [
-        { "event.name": EventName.OTHER, "gen_ai.turn.id": "t1", parent_span_id: "cafebabecafebabe" } as EventLogRecord,
-        { "event.name": EventName.OTHER, "gen_ai.turn.id": "t1", parent_span_id: "deadbeefdeadbeef" } as EventLogRecord,
+        { "event.name": EventName.AGENT_INPUT, "gen_ai.turn.id": "t1", parent_span_id: "cafebabecafebabe" } as EventLogRecord,
+        { "event.name": EventName.AGENT_INPUT, "gen_ai.turn.id": "t1", parent_span_id: "deadbeefdeadbeef" } as EventLogRecord,
       ],
       warnings,
     );
@@ -116,10 +117,10 @@ describe("groupByTurn parent_span_id", () => {
     expect(warnings.some((w) => w.includes("Inconsistent parent_span_id"))).toBe(true);
   });
 
-  it("warns on invalid in other event, keeps undefined", () => {
+  it("warns on invalid in agent.input event, keeps undefined", () => {
     const warnings: string[] = [];
     const groups = groupByTurn(
-      [{ "event.name": EventName.OTHER, "gen_ai.turn.id": "t1", parent_span_id: "not-hex" } as EventLogRecord],
+      [{ "event.name": EventName.AGENT_INPUT, "gen_ai.turn.id": "t1", parent_span_id: "not-hex" } as EventLogRecord],
       warnings,
     );
     expect(groups[0]!.parentSpanId).toBeUndefined();
@@ -149,11 +150,11 @@ describe("E2E: ENTRY span parentSpanId equals upstream value", () => {
     const handler = new ExtendedTelemetryHandler({ tracerProvider: provider });
 
     const records: EventLogRecord[] = [
-      // event.name="other" carries the upstream parent_span_id (做法 A)
+      // event.name="agent.input" carries the upstream parent_span_id.
       {
         time_unix_nano: "1780000000500000000",
         "event.id": "user-input",
-        "event.name": EventName.OTHER,
+        "event.name": EventName.AGENT_INPUT,
         trace_id: TRACE_ID,
         parent_span_id: PARENT_SPAN_ID,
         "gen_ai.session.id": "s",

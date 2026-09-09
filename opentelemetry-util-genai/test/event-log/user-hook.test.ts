@@ -230,14 +230,14 @@ describe("converter: user-hook events merged into ENTRY", () => {
   });
 });
 
-describe("converter: event.name=other as user-input source (做法 A)", () => {
-  it("extracts input.messages from 'other' event into ENTRY span, does NOT generate any LLM span for it", async () => {
+describe("converter: event.name=agent.input as canonical user-input source", () => {
+  it("extracts input.messages from agent.input into ENTRY without generating a span for it", async () => {
     const records: EventLogRecord[] = [
-      // 做法 A: event.name = "other" carrying user prompt
+      // Canonical user-input event.
       {
         time_unix_nano: 1779667200000000000,
-        "event.id": "other-prompt",
-        "event.name": "other" as any,
+        "event.id": "agent-input",
+        "event.name": EventName.AGENT_INPUT,
         "user.id": "u",
         trace_id: "33333333333333333333333333333333",
         "gen_ai.session.id": "s",
@@ -245,7 +245,7 @@ describe("converter: event.name=other as user-input source (做法 A)", () => {
         "gen_ai.agent.type": "claude-code",
         "gen_ai.provider.name": "anthropic",
         "gen_ai.input.messages_delta": JSON.stringify([
-          { role: "user", parts: [{ type: "text", content: "做法A用户输入" }] },
+          { role: "user", parts: [{ type: "text", content: "agent.input 用户输入" }] },
         ]),
       },
       // Real LLM call (has step.id + model)
@@ -261,7 +261,7 @@ describe("converter: event.name=other as user-input source (做法 A)", () => {
         "gen_ai.provider.name": "anthropic",
         "gen_ai.request.model": "claude",
         "gen_ai.input.messages_delta": JSON.stringify([
-          { role: "user", parts: [{ type: "text", content: "做法A用户输入" }] },
+          { role: "user", parts: [{ type: "text", content: "LLM 请求输入" }] },
         ]),
       },
       {
@@ -286,20 +286,72 @@ describe("converter: event.name=other as user-input source (做法 A)", () => {
 
     const { spans, warnings } = await convertEventLogToReadableSpans(records);
 
-    // 4 spans: ENTRY + AGENT + STEP + LLM (no span for "other" event)
+    // 4 spans: ENTRY + AGENT + STEP + LLM (no span for agent.input)
     expect(spans).toHaveLength(4);
     const kinds = spans.map((s) => s.attributes[GEN_AI_SPAN_KIND]).sort();
     expect(kinds).toEqual(
       [GenAiSpanKindValues.ENTRY, GenAiSpanKindValues.AGENT, GenAiSpanKindValues.STEP, GenAiSpanKindValues.LLM].sort(),
     );
 
-    // ENTRY input comes from the "other" event
+    // ENTRY input comes from agent.input, not the LLM request.
     const entry = spans.find((s) => s.attributes[GEN_AI_SPAN_KIND] === GenAiSpanKindValues.ENTRY)!;
     const entryMsgs = JSON.parse(entry.attributes[GEN_AI_INPUT_MESSAGES] as string);
-    expect(entryMsgs[0].parts[0].content).toBe("做法A用户输入");
+    expect(entryMsgs[0].parts[0].content).toBe("agent.input 用户输入");
 
-    // No user-hook warning (做法 A doesn't trigger it)
+    // No legacy user-hook warning.
     expect(warnings.filter((w) => w.includes("user-hook"))).toHaveLength(0);
+  });
+
+  it("ignores legacy other input when agent.input is present during dual-write", async () => {
+    const records: EventLogRecord[] = [
+      {
+        time_unix_nano: 1779667200000000000,
+        "event.id": "legacy-other",
+        "event.name": EventName.OTHER,
+        trace_id: "55555555555555555555555555555555",
+        "gen_ai.turn.id": "t1",
+        "gen_ai.input.messages_delta": JSON.stringify([
+          { role: "user", parts: [{ type: "text", content: "legacy other input" }] },
+        ]),
+      },
+      {
+        time_unix_nano: 1779667200000000000,
+        "event.id": "canonical-input",
+        "event.name": EventName.AGENT_INPUT,
+        trace_id: "55555555555555555555555555555555",
+        "gen_ai.turn.id": "t1",
+        "gen_ai.input.messages_delta": JSON.stringify([
+          { role: "user", parts: [{ type: "text", content: "canonical input" }] },
+        ]),
+      },
+      {
+        time_unix_nano: 1779667200100000000,
+        "event.id": "req",
+        "event.name": EventName.LLM_REQUEST,
+        trace_id: "55555555555555555555555555555555",
+        "gen_ai.turn.id": "t1",
+        "gen_ai.step.id": "t1:s1",
+        "gen_ai.request.model": "gpt-5",
+      },
+      {
+        time_unix_nano: 1779667200200000000,
+        "event.id": "resp",
+        "event.name": EventName.LLM_RESPONSE,
+        trace_id: "55555555555555555555555555555555",
+        "gen_ai.turn.id": "t1",
+        "gen_ai.step.id": "t1:s1",
+        "gen_ai.request.model": "gpt-5",
+        "gen_ai.usage.input_tokens": 1,
+        "gen_ai.usage.output_tokens": 1,
+      },
+    ];
+
+    const { spans } = await convertEventLogToReadableSpans(records);
+    expect(spans).toHaveLength(4);
+    const entry = spans.find((s) => s.attributes[GEN_AI_SPAN_KIND] === GenAiSpanKindValues.ENTRY)!;
+    const entryMsgs = JSON.parse(entry.attributes[GEN_AI_INPUT_MESSAGES] as string);
+    expect(entryMsgs).toHaveLength(1);
+    expect(entryMsgs[0].parts[0].content).toBe("canonical input");
   });
 
   it("'other' events without input.messages are ignored (no side effect)", async () => {
@@ -308,7 +360,7 @@ describe("converter: event.name=other as user-input source (做法 A)", () => {
       {
         time_unix_nano: 1779667200000000000,
         "event.id": "stop-signal",
-        "event.name": "other" as any,
+        "event.name": EventName.OTHER,
         "user.id": "u",
         trace_id: "44444444444444444444444444444444",
         "gen_ai.session.id": "s",

@@ -98,7 +98,7 @@ function subagentParentCallId(r: EventLogRecord): string | undefined {
 
 /** True if a record is a user-input event (feeds ENTRY, not its own span). */
 function isUserInputEvent(r: EventLogRecord): boolean {
-  if (r["event.name"] === EventName.OTHER) {
+  if (r["event.name"] === EventName.AGENT_INPUT) {
     return !!(r["gen_ai.input.messages_delta"] || r["gen_ai.input.messages"]);
   }
   return isUserHookCandidate(r);
@@ -144,7 +144,8 @@ export class TurnStreamSession {
   private turnToolDefs: ReturnType<typeof readTurnToolDefinitions> = [];
 
   private readonly parentPending: EventLogRecord[] = [];
-  private readonly userInputEvents: EventLogRecord[] = [];
+  private readonly agentInputEvents: EventLogRecord[] = [];
+  private readonly legacyUserHookEvents: EventLogRecord[] = [];
   private readonly childRecordsByCallId = new Map<string, EventLogRecord[]>();
   private readonly finalizedStepIds = new Set<string>();
   private readonly finalizedToolCallIds = new Set<string>();
@@ -199,7 +200,10 @@ export class TurnStreamSession {
    * records.
    */
   get pendingRecordCount(): number {
-    let count = this.parentPending.length + this.userInputEvents.length;
+    let count =
+      this.parentPending.length +
+      this.agentInputEvents.length +
+      this.legacyUserHookEvents.length;
     for (const records of this.childRecordsByCallId.values()) count += records.length;
     return count;
   }
@@ -209,7 +213,7 @@ export class TurnStreamSession {
     if (records.length === 0) return;
 
     for (const r of records) {
-      this.resolveTurnContext(r); // trace_id + parent_span_id + turn.id (all events)
+      this.resolveTurnContext(r); // trace_id + turn.id from all; parent only from agent.input
 
       const childOf = subagentParentCallId(r);
       if (childOf) {
@@ -225,14 +229,18 @@ export class TurnStreamSession {
         this.childRecordsByCallId.set(childOf, list);
         continue;
       }
+      if (r["event.name"] === EventName.AGENT_INPUT) {
+        if (isUserInputEvent(r)) this.agentInputEvents.push(r);
+        // agent.input is a structural input marker, never a span-producing
+        // record. Its trace context was already captured above.
+        continue;
+      }
       if (r["event.name"] === EventName.OTHER) {
-        if (isUserInputEvent(r)) this.userInputEvents.push(r);
-        // "other" without messages is discarded (matches convertTurn), but its
-        // parent_span_id/trace_id were already captured by resolveTurnContext.
+        // Generic metadata is deliberately excluded from the trace tree.
         continue;
       }
       if (isUserHookCandidate(r)) {
-        this.userInputEvents.push(r);
+        this.legacyUserHookEvents.push(r);
         this.userHookCount += 1;
         continue;
       }
@@ -267,10 +275,10 @@ export class TurnStreamSession {
   end(endTimeMs?: number): TurnStreamResult {
     if (this.ended) return this.result();
 
-    // Deprecation notice for 做法 B user-hook prompts (matches convertTurn).
+    // Deprecation notice for legacy user-hook prompts (matches convertTurn).
     if (this.userHookCount > 0) {
       this.warnings.push(
-        `Treated ${this.userHookCount} llm.request event(s) as user-hook prompt(s), merged into ENTRY (turn ${this.turnId ?? "(no turn.id)"}). Consider migrating to event.name="other" (做法 A).`,
+        `Treated ${this.userHookCount} llm.request event(s) as user-hook prompt(s), merged into ENTRY (turn ${this.turnId ?? "(no turn.id)"}). Consider migrating to event.name="agent.input".`,
       );
     }
 
@@ -322,11 +330,10 @@ export class TurnStreamSession {
   /**
    * Resolve turn-level trace_id / parent_span_id / turn.id from a record,
    * mirroring groupByTurn before ENTRY starts: trace_id from any event (first
-   * valid wins);
-   * parent_span_id only from event.name="other" (做法 A upstream marker), never
-   * from llm/tool events (those carry intra-trace parent pointers). Once ENTRY
-   * starts, its parent context is immutable and conflicting late context is
-   * ignored with an explicit warning.
+   * valid wins); parent_span_id only from event.name="agent.input", never from
+   * generic other or llm/tool events. Once ENTRY starts, its parent context is
+   * immutable and conflicting late context is ignored with an explicit
+   * warning.
    */
   private resolveTurnContext(r: EventLogRecord): void {
     if (this.turnId === undefined) {
@@ -355,7 +362,7 @@ export class TurnStreamSession {
       );
     }
 
-    if (r["event.name"] === EventName.OTHER) {
+    if (r["event.name"] === EventName.AGENT_INPUT) {
       const spanCand = r["parent_span_id"];
       if (isValidSpanId(spanCand)) {
         if (this.parentSpanId === undefined) this.parentSpanId = spanCand as string;
@@ -386,16 +393,20 @@ export class TurnStreamSession {
 
   private start(): void {
     this.started = true;
+    const inputEvents =
+      this.agentInputEvents.length > 0
+        ? this.agentInputEvents
+        : this.legacyUserHookEvents;
     this.common = {
-      agentName: resolveTurnAgentName(this.parentPending, this.userInputEvents) ?? null,
-      userId: resolveTurnUserId(this.parentPending, this.userInputEvents) ?? null,
-      sessionId: resolveTurnSessionId(this.parentPending, this.userInputEvents) ?? null,
+      agentName: resolveTurnAgentName(this.parentPending, inputEvents) ?? null,
+      userId: resolveTurnUserId(this.parentPending, inputEvents) ?? null,
+      sessionId: resolveTurnSessionId(this.parentPending, inputEvents) ?? null,
       passthroughKeys: this.passthroughKeys,
       skillDetection: this.skillDetection,
       passthroughTurn: collectPassthrough(
         this.passthroughKeys,
         ...this.parentPending,
-        ...this.userInputEvents,
+        ...inputEvents,
       ),
     };
 
@@ -404,8 +415,8 @@ export class TurnStreamSession {
       parentContext = createTraceParentContext(this._traceId, this.parentSpanId);
     }
 
-    this.entryInv = buildEntryInvocation(this.parentPending, this.userInputEvents, this.common);
-    this.agentInv = buildInvokeAgentInvocation(this.parentPending, this.userInputEvents, this.common);
+    this.entryInv = buildEntryInvocation(this.parentPending, inputEvents, this.common);
+    this.agentInv = buildInvokeAgentInvocation(this.parentPending, inputEvents, this.common);
 
     const startMs = this.earliestMs === Number.POSITIVE_INFINITY ? 0 : this.earliestMs;
     this.handler.startEntry(this.entryInv, parentContext, startMs);
@@ -516,7 +527,8 @@ export class TurnStreamSession {
 
   private releaseRetainedState(): void {
     this.parentPending.length = 0;
-    this.userInputEvents.length = 0;
+    this.agentInputEvents.length = 0;
+    this.legacyUserHookEvents.length = 0;
     this.childRecordsByCallId.clear();
     this.finalizedStepIds.clear();
     this.finalizedToolCallIds.clear();

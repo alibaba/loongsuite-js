@@ -45,7 +45,8 @@ ENTRY  (一次用户输入的入口)                         ← 每个 turn 一
 | `llm.response` | 一次 LLM 调用的响应侧 | 同上 |
 | `tool.call` | 一次工具调用的发起 | 与 `tool.result` 配对 → 1 个 **TOOL span** |
 | `tool.result` | 一次工具调用的结果 | 同上 |
-| `other` | 用户输入载体（做法 A）| 带 `gen_ai.input.messages(_delta)` → 归并到 **ENTRY**；否则静默丢弃（见 §5.1）。**不生成独立 span** |
+| `agent.input` | Agent 用户输入 | `gen_ai.input.messages(_delta)` → 归并到 **ENTRY/AGENT**；可携带 turn 级上游 `parent_span_id`。**不生成独立 span** |
+| `other` | 普通元数据 | 转换 Trace 树时静默丢弃，即使携带 input messages 或 `parent_span_id` 也不赋予结构语义。**不生成独立 span** |
 | `skill.use` / `tool.approve` | 暂不支持 | 被忽略 |
 
 **ENTRY / AGENT / STEP 这三类"容器 span" 在事件流里没有对应的事件**——它们由转换器根据 `turn.id` / `step.id` 分组**自动生成**。这意味着：上游不需要、也不应该为它们写事件；上游只需要保证每条叶子事件（llm/tool）带对正确的 `turn.id` / `step.id`。
@@ -132,8 +133,9 @@ ENTRY 创建之前，必须已经获得该 turn 的 `trace_id` 以及可选的 `
 
 - `TurnStreamSession` 可通过构造参数 `traceId` / `parentSpanId` 显式接收权威上下文；
   `parentSpanId` 必须与 `traceId` 一起提供。
-- 不显式提供时，使用 ENTRY 创建前从 event record 中观察到的第一个有效上下文；
-  若仍没有有效 `trace_id`，由 OpenTelemetry SDK 分配新 trace ID。
+- 不显式提供时，`trace_id` 使用 ENTRY 创建前从任意 event record 中观察到的
+  第一个有效值；turn 级上游 `parent_span_id` 只从 `agent.input` 读取。若仍没有
+  有效 `trace_id`，由 OpenTelemetry SDK 分配新 trace ID。
 - ENTRY 创建后才到达的不同 trace context 无法重新挂接已有 span，将被忽略并产生
   `LATE_TRACE_CONTEXT_IGNORED` 告警。
 
@@ -372,11 +374,16 @@ ENTRY → AGENT → STEP → LLM + TOOL(Agent)
 
 ### 5.1 [MUST] 上游的正确做法
 
-**做法 A（[MUST] 推荐，0.1.0-beta.3+）**：用户输入发 `event.name = "other"`，在 `gen_ai.input.messages_delta`（或 `gen_ai.input.messages`）字段携带用户原始 prompt。转换器会提取该字段归并到 ENTRY/AGENT 的 `input.messages`，**不会**为 `other` 事件生成任何 span。没有 messages 字段的 `other` 事件（如 cursor 的 stop 信号）会被静默丢弃。
+**标准做法（[MUST]）**：用户输入发 `event.name = "agent.input"`，在
+`gen_ai.input.messages_delta`（或 `gen_ai.input.messages`）字段携带用户原始
+prompt。转换器会提取该字段归并到 ENTRY/AGENT 的 `input.messages`，但不会为
+`agent.input` 事件生成独立 span。若需要把 ENTRY 挂到外部 trace，其
+`parent_span_id` 也必须放在 `agent.input` 上。`other` 事件不再作为用户输入或
+turn 级父上下文来源。
 
 ```json
 {
-  "event.name": "other",
+  "event.name": "agent.input",
   "gen_ai.input.messages_delta": [
     { "role": "user", "parts": [{ "type": "text", "content": "用户输入内容" }] }
   ],
@@ -385,7 +392,10 @@ ENTRY → AGENT → STEP → LLM + TOOL(Agent)
 }
 ```
 
-**做法 B（⚠️ 已过期，准备废弃）**：用户输入仍发 `llm.request`，但保证它缺 step.id + 缺 model。转换器仍能识别为 user-hook 并归并到 ENTRY，但会产出一条 deprecation warning（`"Consider migrating to event.name='other'"`）。**新插件必须用做法 A；已有插件应尽快迁移。**
+**Legacy 兼容（⚠️ 已过期，准备废弃）**：用户输入仍发 `llm.request`，但保证
+它缺 step.id + 缺 model。转换器仍能识别为 user-hook 并归并到 ENTRY，但会
+产出一条 deprecation warning（`Consider migrating to event.name="agent.input"`）。
+**新插件必须发 `agent.input`；已有插件应尽快迁移。**
 
 > **[MUST] 真实的 LLM 调用必须有 step.id + model**，这样才能和"用户输入伪请求"区分开。如果真实 LLM 调用也缺 step.id+model，会被误判为 user-hook 而丢失。
 
@@ -429,10 +439,10 @@ part 的 `type` 取值：`text` / `reasoning` / `tool_call` / `tool_call_respons
 ### 8.1 输入：事件日志（一次对话，1 个 turn，2 个 step，含 1 次工具调用）
 
 ```jsonc
-// 事件 1：用户输入（user-hook：缺 step.id + 缺 model）
+// 事件 1：用户输入（agent.input 不生成独立 span）
 {
   "time_unix_nano": "1780000000000000000",
-  "event.id": "e1", "event.name": "llm.request",
+  "event.id": "e1", "event.name": "agent.input",
   "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
   "gen_ai.session.id": "sess-1", "gen_ai.turn.id": "sess-1:t1",
   "user.id": "u-100", "gen_ai.agent.type": "demo-agent",
@@ -540,7 +550,7 @@ trace 4bf92f3577b34da6a3ce929d0e0e4736
 ```
 
 要点对照：
-- 事件 1（user-hook）**没有**生成 LLM span，它的内容归并进了 ENTRY 的 input.messages。
+- 事件 1（`agent.input`）**没有**生成独立 span，它的内容归并进了 ENTRY/AGENT 的 input.messages。
 - 7 条事件 → 7 个 span。注意事件与 span **不是**一一对应：事件 1 不产生独立 span（归并到 ENTRY），ENTRY / AGENT / STEP 是转换器自动生成的容器 span。最终 span 组成 = 4 个容器（ENTRY + AGENT + 2 STEP）+ 2 个 LLM + 1 个 TOOL = 7。
 - STEP 数（2）== 真实 LLM 调用数（2）。
 - AGENT 的 token 是两个 LLM 的累加（in: 1200+1260=2460，out: 30+20=50）。
@@ -650,7 +660,7 @@ import('@loongsuite/otel-util-genai').then(async ({ convertEventLogToReadableSpa
 - `traces` 数 == 真实用户对话次数
 - `STEP 数 == LLM 数`
 - `0ms spans` ≈ 0（除真实中断/孤立场景）
-- **非 user-hook 类** `warnings` ≈ 0（除真实中断/孤立场景）。注意：使用 §5 做法 B 的插件每个 turn 会产出一条 `"Treated N llm.request event(s) as user-hook prompt(s)..."` 的 info 级 warning——**这是预期行为，不算违规**。只关注 `Orphan`、`Invalid`、`Inconsistent` 类 warning 是否趋零。
+- **非 user-hook 类** `warnings` ≈ 0（除真实中断/孤立场景）。注意：使用 §5 legacy 兼容格式的插件每个 turn 会产出一条 `"Treated N llm.request event(s) as user-hook prompt(s)..."` 的 info 级 warning——**这是预期行为，不算违规**。只关注 `Orphan`、`Invalid`、`Inconsistent` 类 warning 是否趋零。
 - 每个 span 都有 `gen_ai.agent.name` / `gen_ai.user.id` / `gen_ai.session.id`
 
 ---
@@ -666,8 +676,8 @@ import('@loongsuite/otel-util-genai').then(async ({ convertEventLogToReadableSpa
 - ❌ 不去重 pilot 的重复转换。
 - ❌ 不把独立的 `skill.use` 事件关联为 TOOL span；Skill 属性通过
   `tool.call`/`tool.result` 显式字段或 §3.3.1 的可关闭启发式识别。
-  `tool.approve` 仍忽略。`other` 仅提取 `input.messages` 归并到 ENTRY，
-  不生成 span（见 §5.1）。
+  `tool.approve` 仍忽略。`other` 不再提取 `input.messages` 或
+  `parent_span_id`，也不生成 span（见 §5.1）。
 
 **一切 trace 质量问题，先查事件日志是否符合本规范。**
 
